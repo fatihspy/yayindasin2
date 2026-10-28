@@ -10,18 +10,19 @@
  */
 (function () {
   const ENDPOINT = '/api/ai';
-  const MAX_PARALLEL = 2;
+  const MAX_PARALLEL = 3;
   const RETRY_DELAYS = [3000, 8000, 20000]; // ms
 
-  // ---- basit istek sırası ----
+  // ---- öncelikli istek sırası ----
+  // Kullanıcının bastığı butonlar (default) arka plan çevirilerinin (quick) önüne geçer.
   let active = 0;
-  const waiting = [];
-  function slot() {
+  const waiting = { high: [], low: [] };
+  function slot(high) {
     if (active < MAX_PARALLEL) { active++; return Promise.resolve(); }
-    return new Promise(res => waiting.push(res));
+    return new Promise(res => waiting[high ? 'high' : 'low'].push(res));
   }
   function release() {
-    const next = waiting.shift();
+    const next = waiting.high.shift() || waiting.low.shift();
     if (next) next(); else active--;
   }
   const wait = (ms, signal) => new Promise((res, rej) => {
@@ -106,7 +107,7 @@
     const prompt = lastUser(messages);
     let lastErr;
     for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
-      await slot();
+      await slot(opts.modelTier !== 'quick');
       try {
         const text = await once(messages, opts, json);
         return json ? parseJSON(text, prompt) : text;
