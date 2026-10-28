@@ -16,7 +16,8 @@ const API = 'https://generativelanguage.googleapis.com/v1beta/models/';
 const env = k => (globalThis.Netlify && Netlify.env.get(k)) || '';
 const json = (status, body) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
-const norm = s => String(s || '').trim().replace(/\/+$/, '').toLowerCase();
+// "https://site.netlify.app/", "site.netlify.app" gibi yazımların hepsi aynı sayılır
+const norm = s => String(s || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');
 
 function modelList(tier) {
   const base = MODELS[tier] || MODELS.default;
@@ -38,8 +39,8 @@ function payload(messages, wantJson) {
   };
 }
 
-// Model bulunamadı / bu hesaba kapalı / kota doldu → sıradaki modeli dene
-const tryNext = s => s === 400 || s === 403 || s === 404 || s === 429;
+// Model bulunamadı / bu hesaba kapalı / kota doldu / Google tarafı yoğun → sıradaki modeli dene
+const tryNext = s => s === 400 || s === 403 || s === 404 || s === 429 || s >= 500;
 
 async function diagnose(key) {
   const out = { anahtar_tanimli: !!key, izinli_adres: env('ALLOWED_ORIGIN') || '(tanımlı değil — her yerden çalışır)', modeller: {} };
