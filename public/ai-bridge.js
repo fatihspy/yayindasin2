@@ -25,22 +25,41 @@
       });
     } catch (e) {
       if (e && e.name === 'AbortError') throw e;
-      throw { code: 'unavailable', message: 'Sunucuya ulaşılamadı' };
+      throw { code: 'server_error', message: 'Sunucuya ulaşılamadı' };
     }
-    let data = {};
-    try { data = await res.json(); } catch (e) {}
     if (!res.ok) {
-      const code = res.status === 429 ? 'rate_limited' : (data.code || 'unavailable');
+      let data = {};
+      try { data = await res.json(); } catch (e) {}
+      // Uygulama 'unavailable' ve 'not_granted' kodlarını "Claude izni verilmedi" diye yorumlayıp
+      // yapay zekâyı oturum boyunca kapatıyor. Sunucu hataları geçici olduğu için farklı bir kod kullan.
+      const code = res.status === 429 ? 'rate_limited' : 'server_error';
+      console.warn('[Yayındasın AI]', res.status, data.error || '', data.detail || '');
       throw { code, message: data.error || ('HTTP ' + res.status) };
     }
-    return data;
+    // Yanıt düz metin akışı olarak gelir
+    const onText = opts && typeof opts.onText === 'function' ? opts.onText : null;
+    let text = '';
+    if (res.body && res.body.getReader) {
+      const reader = res.body.getReader(), dec = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const delta = dec.decode(value, { stream: true });
+        text += delta;
+        if (onText && delta) { try { onText({ text, delta }); } catch (e) {} }
+      }
+      text += dec.decode();
+    } else {
+      text = await res.text();
+      if (onText) { try { onText({ text, delta: text }); } catch (e) {} }
+    }
+    if (!text.trim()) throw { code: 'server_error', message: 'Yapay zekâ boş yanıt döndürdü' };
+    return { text };
   }
 
   async function sample(input, opts) {
     const d = await call(input, opts, false);
-    const text = d.text || '';
-    if (opts && typeof opts.onText === 'function') { try { opts.onText({ text, delta: text }); } catch (e) {} }
-    return { text, truncated: !!d.truncated };
+    return { text: d.text, truncated: false };
   }
 
   sample.json = async function (input, opts) {
