@@ -1092,7 +1092,7 @@ mod('mimik',{t:'Mimiksizlik',s:'Yapay zekâ ile nötr yüz',i:'🙂',xp:40,group
 mod('tekerleme',{t:'Tekerlemeler',s:'Hız ve netlik',i:'🌀',xp:25,group:'akademi',render(b){
  b.innerHTML=`<p class="lead">Vurgulanan kelimeyi tempoya yetişerek oku. Yavaş başla; hızlı modda hatasız bitirince puan alırsın.</p>
  <div class="chips">${[['650','Yavaş'],['420','Orta'],['270','Hızlı']].map(([v,n],i)=>`<button class="chip" data-sp="${v}" aria-pressed="${i===0}">${n}</button>`).join('')}</div>
- <div class="say" data-say></div>
+ <div class="say" data-say data-notr></div>
  <div class="row-btns"><button class="btn" data-go>Oku</button><button class="btn ghost" data-nx>Başka tekerleme</button><button class="btn ghost" data-ok disabled>Hatasız okudum</button></div>`;
  let sp=650,ti=Math.floor(Math.random()*D('TWISTERS').length),run=0;
  const draw=()=>{$('[data-say]',b).innerHTML=D('TWISTERS')[ti].split(' ').map(w=>`<span class="w">${w}</span>`).join(' ')};draw();
@@ -1389,13 +1389,17 @@ async function ensureTr(tasks){if(S.lang==='tr')return 'cached';const lang=S.lan
   .then(r=>{const arr=Array.isArray(r)?r:(r&&Array.isArray(r.data)?r.data:[]);arr.forEach(o=>{if(o&&o.id&&typeof o.t==='string'&&S.lang===lang){S.trc[lang+':'+o.id]=o;any=true;seedIdentity(o)}})}).catch(trErr)));
  save();return any?'done':'fail'}
 /* DOM fallback: any Turkish text left on screen is queued, translated in small batches and cached */
-const UIQ=new Set();let uiT=null,uiBusy=false;
+const UIQ=new Set(),UIR={};let uiT=null,uiBusy=false;
 const HAS_L=/[A-Za-zÇĞİÖŞÜçğıöşüÂâÎîÛû]/;
 function trNode(n){if(!S.lang||S.lang==='tr')return;const raw=n.nodeValue;if(!raw)return;const s=raw.trim();if(s.length<2||!HAS_L.test(s))return;const m=uiMap();
  if(m[s]!=null){if(m[s]!==s){m[m[s].trim()]=m[s].trim();n.nodeValue=raw.replace(s,m[s])}return}UIQ.add(s);if(!uiT)uiT=setTimeout(flushTr,400)}
 function okNode(n){const p=n.parentElement;return !!p&&!p.closest('[data-notr],script,style,textarea,select,option,audio,video,canvas,svg')}
 function walkTr(root){if(!S.lang||S.lang==='tr'||!root)return;if(root.nodeType===3){if(okNode(root))trNode(root);return}if(root.nodeType!==1||root.closest('[data-notr]'))return;
- const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:n=>okNode(n)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT});const ns=[];while(w.nextNode())ns.push(w.currentNode);ns.forEach(trNode)}
+ const w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:n=>okNode(n)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_REJECT});const ns=[];while(w.nextNode())ns.push(w.currentNode);ns.forEach(trNode);trAttrs(root)}
+const TR_ATTRS=['placeholder','aria-label','title'];
+function trAttrs(root){if(!S.lang||S.lang==='tr'||!root||root.nodeType!==1)return;const m=uiMap();const els=[root,...root.querySelectorAll('[placeholder],[aria-label],[title]')];
+ for(const el of els){if(el.closest('[data-notr]'))continue;for(const a of TR_ATTRS){const v=el.getAttribute(a);if(!v)continue;const t=v.trim();if(t.length<2||!HAS_L.test(t))continue;
+  if(m[t]!=null){if(m[t]!==t){m[m[t]]=m[t];el.setAttribute(a,m[t])}}else{UIQ.add(t);if(!uiT)uiT=setTimeout(flushTr,400)}}}}
 async function flushTr(){uiT=null;if(uiBusy||!UIQ.size)return;if(S.lang==='tr'||trBlocked){UIQ.clear();return}
  if(Date.now()<trPauseUntil){uiT=setTimeout(flushTr,trPauseUntil-Date.now()+200);return}
  const sm=await getSample();if(!sm){UIQ.clear();return}
@@ -1403,8 +1407,8 @@ async function flushTr(){uiT=null;if(uiBusy||!UIQ.size)return;if(S.lang==='tr'||
  try{const r=await sm.json(`Translate each string of this JSON array from Turkish into ${LANGS[LI()][1]} (language code: ${lang}). They are interface labels and practice texts of a training app for TV and radio presenters. Use Cyrillic script for Kazakh and Kyrgyz; Latin script for Azerbaijani, Uzbek and Turkmen. Keep emojis, numbers, symbols and punctuation. If a string is already in the target language or is a proper name, return it unchanged. Reply with only a JSON array of the same length and order.
 ${JSON.stringify(items)}`,{modelTier:'quick',cache:false});
   if(Array.isArray(r)&&S.lang===lang){const m=uiMap();items.forEach((s,i)=>{const t=typeof r[i]==='string'&&r[i].trim()?r[i].trim():s;m[s]=t;m[t]=t});save();walkTr($('#app'));walkTr($('#sheet'));walkTr($('.gate'));walkTr($('#tabs'))}}
- catch(e){trErr(e)}
- finally{uiBusy=false;if(UIQ.size&&!uiT)uiT=setTimeout(flushTr,400)}}
+ catch(e){trErr(e);items.forEach(s=>{UIR[s]=(UIR[s]||0)+1;if(UIR[s]<3)UIQ.add(s)})}
+ finally{uiBusy=false;if(UIQ.size&&!uiT)uiT=setTimeout(flushTr,Math.max(400,trPauseUntil-Date.now()+200))}}
 function seedUI(){if(!S.lang||S.lang==='tr')return;const m=uiMap(),i=LI();for(const k in L){const v=L[k][i];if(v){m[v]=v;const t=v.trim();m[t]=t}}}
 new MutationObserver(ms=>{if(!S.lang||S.lang==='tr')return;for(const mu of ms){if(mu.type==='characterData'){if(okNode(mu.target))trNode(mu.target)}else mu.addedNodes.forEach(walkTr)}}).observe(document.body,{subtree:true,childList:true,characterData:true});
 
@@ -1950,7 +1954,7 @@ function openSheet(id){
  live.forEach(f=>{try{f()}catch(e){}});live=[];Mic.stop();Cam.stop();
  const m=MODS[id];sheet.innerHTML=`<div class="inner"><div class="shead"><button class="back" data-back>${tl('back')}</button><h1>${esc(tl('m_'+id))}</h1></div><div data-bar></div><div data-body></div></div>`;
  sheet.hidden=false;sheet.scrollTop=0;document.body.style.overflow='hidden';
- $('[data-back]',sheet).onclick=closeSheet;const body=$('[data-body]',sheet);dayBar(id);if(id==='g'||id==='tekerleme')body.dataset.notr='1';
+ $('[data-back]',sheet).onclick=closeSheet;const body=$('[data-body]',sheet);dayBar(id);if(id==='g')body.dataset.notr='1';
  const need=(PACKS[id]||[]).filter(n=>S.lang&&S.lang!=='tr'&&!(S.pk&&S.pk[S.lang+':'+n]));
  if(!need.length){m.render(body);return}
  body.innerHTML=`<p class="note">${tl('pk_busy')}</p>`;ensurePacks(need).then(r=>{if(sheet.hidden||!body.isConnected)return;body.innerHTML='';if(r==='none'&&!trBlocked)toast(tl('pk_fail'));m.render(body)});
