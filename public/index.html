@@ -1302,7 +1302,7 @@ function speak(text,onend,code){if(!('speechSynthesis' in window))return false;c
 try{if('speechSynthesis' in window){speechSynthesis.getVoices();speechSynthesis.onvoiceschanged=()=>{}}}catch(e){}
 
 /* ---------- portfolio ---------- */
-async function portAdd(blob,meta){S.port=S.port||[];const key='port:'+Date.now();await blobPut(key,blob);S.port.unshift({id:key,key,kind:kindOf(blob.type||''),title:meta.title||'',src:meta.src||'canli',dur:meta.dur||null,date:today(),cv:false});save();toast(tl('k_added'))}
+async function portAdd(blob,meta){S.port=S.port||[];const key='port:'+Date.now();await blobPut(key,blob);S.port.unshift({id:key,key,kind:kindOf(blob.type||''),title:meta.title||'',src:meta.src||'canli',dur:meta.dur||null,date:today(),cv:false});save();toast(tl('k_added'));window.Cloud&&Cloud.queue()}
 function addPortBtn(el,blob,meta){if(!el||!blob)return;const bt=document.createElement('button');bt.className='btn ghost sm';bt.style.marginTop='10px';bt.textContent='＋ '+tl('k_add');bt.onclick=async()=>{bt.disabled=true;await portAdd(blob,meta);bt.textContent='✓ '+tl('k_added')};el.appendChild(bt)}
 
 /* ---------- trainer scripts (emphasis markup: **vurgu**, | kısa durak, || uzun durak, [duygu geçişi]) ---------- */
@@ -1983,7 +1983,7 @@ function setLang(v){S.lang=v;save();seedUI();render();toast(tl('lang_note'))}
 function renderKayit(app){tabUrls.forEach(u=>URL.revokeObjectURL(u));tabUrls=[];S.port=S.port||[];
  const F=[['all',tl('k_all')],['canli',tl('g_canli')],['ses',tl('m_seslendirme')],['sokak',tl('m_sokak')],['cv',tl('k_oncv')]];
  const items=S.port.filter(z=>kf==='all'||(kf==='cv'?z.cv:z.src===kf));const SRC={canli:tl('g_canli'),ses:tl('g_ses'),sokak:tl('m_sokak')};
- app.innerHTML=`<header class="pagehead"><h1>${tl('tab_kayit')}</h1><p>${tl('k_sub')}</p></header>
+ app.innerHTML=`<header class="pagehead"><h1>${tl('tab_kayit')}</h1><p>${tl('k_sub')}</p></header><div data-cloud></div>
  <div class="chips" style="margin-top:14px">${F.map(([k,n])=>`<button class="chip" data-kf="${k}" aria-pressed="${k===kf}">${n}</button>`).join('')}</div>
  ${items.length?'':`<div class="card"><p class="note" style="margin:0">${tl('k_empty')}</p></div>`}<div class="list" data-plist></div>
  <div class="list" style="margin-top:18px"><button class="row" data-open="cv"><span class="ico">📄</span><span><b>${tl('p_cv')}</b><small>${tl('p_cv_s')}</small></span></button></div>`;
@@ -1991,11 +1991,11 @@ function renderKayit(app){tabUrls.forEach(u=>URL.revokeObjectURL(u));tabUrls=[];
  const box=$('[data-plist]',app);
  items.forEach(z=>{const d=document.createElement('div');d.className='pitem';
   d.innerHTML=`<input type="text" value="${esc(z.title)}" aria-label="${tl('k_name')}"><p class="pmeta">${SRC[z.src]||''}, ${KN(z.kind)}${z.dur?', '+fmt(z.dur):''}, ${esc(z.date)}</p><div data-m></div><div class="row-btns" style="margin:8px 0 0"><button class="chip" data-cv aria-pressed="${!!z.cv}">${z.cv?tl('k_cvon'):tl('k_cvoff')}</button><button class="chip" data-del>${tl('k_del')}</button></div>`;
-  $('input',d).onchange=e=>{z.title=e.target.value;save()};
-  $('[data-cv]',d).onclick=()=>{z.cv=!z.cv;save();render()};
-  $('[data-del]',d).onclick=async()=>{if(z.key.startsWith('port:'))await blobDel(z.key);S.port=S.port.filter(q=>q!==z);save();render()};
-  blobGet(z.key).then(bl=>{const mm=$('[data-m]',d);if(!bl){mm.innerHTML=`<p class="note" style="margin:6px 0 0">${tl('lost')}</p>`;return}const u=URL.createObjectURL(bl);tabUrls.push(u);const el=document.createElement(z.kind==='foto'?'img':z.kind==='video'?'video':'audio');el.src=u;if(z.kind!=='foto'){el.controls=true;el.playsInline=true;el.preload='metadata'}else el.alt=z.title;mm.appendChild(el)});
-  box.appendChild(d)})}
+  $('input',d).onchange=e=>{z.title=e.target.value;save();window.Cloud&&Cloud.update(z,{title:z.title})};
+  $('[data-cv]',d).onclick=()=>{z.cv=!z.cv;save();window.Cloud&&Cloud.update(z,{cv:z.cv});render()};
+  $('[data-del]',d).onclick=async()=>{if(window.Cloud&&z.cid&&!confirm('Bu kayıt hesabından ve bütün cihazlarından silinsin mi?'))return;if(window.Cloud)await Cloud.remove(z);if(z.key.startsWith('port:'))await blobDel(z.key);S.port=S.port.filter(q=>q!==z);save();render()};
+  blobGet(z.key).then(async bl=>{const mm=$('[data-m]',d);let u=null;if(bl){u=URL.createObjectURL(bl);tabUrls.push(u)}else if(window.Cloud&&z.path)u=await Cloud.url(z);if(!u){mm.innerHTML=`<p class="note" style="margin:6px 0 0">${tl('lost')}</p>`;return}const el=document.createElement(z.kind==='foto'?'img':z.kind==='video'?'video':'audio');el.src=u;if(z.kind!=='foto'){el.controls=true;el.playsInline=true;el.preload='metadata'}else el.alt=z.title;mm.appendChild(el)});
+  window.Cloud&&Cloud.decorate(d,z);box.appendChild(d)});window.Cloud&&Cloud.kayitStatus($('[data-cloud]',app))}
 function render(){
  document.documentElement.lang=S.lang||'tr';applyTheme();
  const app=$('#app'),Lv=lvl(),pct=Lv.next?Math.round((S.xp-Lv.min)/(Lv.next-Lv.min)*100):100,td=S.days[today()]||[];
@@ -2026,7 +2026,7 @@ function render(){
   app.innerHTML=`<header class="pagehead"><h1>${esc(S.name)}</h1><p>${lvName(Lv.i)}, ${S.xp} XP</p></header>
   <div class="stats"><div><b>${earned}</b><small>${tl('s_badge')}</small></div><div><b>${days}</b><small>${tl('s_days')}</small></div><div><b>${(S.best.gol||0).toFixed(1)}</b><small>${tl('s_goal')}</small></div></div>
   <div class="list" style="margin-top:12px"><button class="row" data-open="cv"><span class="ico">📄</span><span><b>${tl('p_cv')}</b><small>${tl('p_cv_s')}</small></span></button></div>
-  <div class="sec"><h2>${tl('lang_label')}</h2></div>${langSel()}<p class="note">${tl('lang_note')}</p>
+  <div data-account></div><div class="sec"><h2>${tl('lang_label')}</h2></div>${langSel()}<p class="note">${tl('lang_note')}</p>
   <div class="sec"><h2>${tl('p_badges')}</h2><span>${earned} / ${ids.length}</span></div>
   <div class="badges">${ids.map(id=>`<div class="bd ${S.done[id]?'on':''}"><span>${MODS[id].i}</span>${esc(tl('m_'+id).split(':')[0])}</div>`).join('')}</div>
   <div class="sec"><h2>${tl('p_career')}</h2></div>
@@ -2036,7 +2036,7 @@ function render(){
   <button class="btn ghost sm" data-perm>${tl('p_permbtn')}</button>
   <div class="req trainer" data-wel hidden style="margin-top:18px"></div>
   <div class="row-btns"><button class="btn ghost sm" data-reset>${tl('p_reset')}</button></div>`;
-  $('#pn').onchange=e=>{S.name=e.target.value.trim()||'Adınız Soyadınız';save();render()};
+  $('#pn').onchange=e=>{S.name=e.target.value.trim()||'Adınız Soyadınız';save();window.Cloud&&Cloud.saveName();render()};window.Cloud&&Cloud.accountCard($('[data-account]'));
   $('[data-perm]').onclick=()=>permGate(true);
   trainerBox($('[data-wel]'),'welcome_'+S.lang,{title:'Eğitmen paneli: karşılama sesi',hint:'Uygulamanın açılışında ve Bugün sekmesinde çalar. Burada kayıt yoksa yüklediğin “Giriş” kaydı çalar.',script:S.lang==='tr'?WELCOME:null});
   $('[data-reset]').onclick=()=>{if(confirm('Tüm XP, rozet, görev ve kayıt ilerlemen silinsin mi?')){Object.assign(S,{xp:0,done:{},days:{},street:{},proof:{},best:{},script:'',port:[],streetLog:[],ai_tasks:[]});save();blobClear();render()}};
@@ -2152,5 +2152,8 @@ iconize(document.body);
 seedUI();render();if(!S.onboarded)onboard();else permGate();
 
 </script>
+<script src="/vendor/supabase-2.117.3.js"></script>
+<script src="/config.js"></script>
+<script src="/cloud.js"></script>
 </body>
 </html>
