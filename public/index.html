@@ -1132,7 +1132,7 @@ mod('prompter',{t:'Prompter',s:'Metin seç, hızı ayarla, oku',i:'📜',xp:30,g
  <div class="ctrl"><span>Yazı boyu</span><input type="range" min="20" max="44" value="30" data-fs aria-label="Yazı boyutu"><output data-fso>30</output></div>
  <div class="row-btns"><button class="btn rec" data-go>Başlat</button><button class="btn ghost" data-rs>Başa sar</button><button class="btn ghost" data-mr aria-pressed="false">Ayna modu</button></div>
  <p class="note" data-info></p><div class="row-btns" style="margin-top:0"><button class="btn ghost sm" data-model hidden></button></div><div class="req trainer" data-tb hidden></div>`;
- let key=opts[0][0],pos=0,on=false,stop=null;const P=$('[data-p]',b),T=$('[data-txt]',b);
+ let key=opts[0][0],pos=0,on=false,stop=null,fromStart=false;const P=$('[data-p]',b),T=$('[data-txt]',b);
  const text=()=>(opts.find(o=>o[0]===key)||opts[0])[1].x;
  const place=()=>{T.style.transform=`translateY(${P.clientHeight*.38-pos}px)`};
  const info=()=>{const w=text().split(/\s+/).length;$('[data-info]',b).textContent=`${w} kelime. Haber temposunda (dakikada 130 kelime) yaklaşık ${Math.round(w/130*60)} saniye.`};
@@ -1169,8 +1169,8 @@ Yalnızca şu JSON'u döndür, başka hiçbir şey yazma:
  $('[data-mr]',b).onclick=e=>{const m=P.classList.toggle('mirror');e.target.setAttribute('aria-pressed',m)};
  const halt=()=>{on=false;if(stop)stop();$('[data-go]',b).textContent='Başlat'};
  $('[data-rs]',b).onclick=()=>{halt();pos=0;place()};
- $('[data-go]',b).onclick=async()=>{if(on)return halt();if(pos===0)await countdown();on=true;$('[data-go]',b).textContent='Duraklat';
-  stop=loop(dt=>{pos+=(+$('[data-sp]',b).value)*9*dt;place();if(pos>T.offsetHeight){halt();award('prompter',30,'Prompter okuması');return false}})};
+ $('[data-go]',b).onclick=async()=>{if(on)return halt();if(pos>=T.offsetHeight){pos=0;place()}if(pos===0){fromStart=true;await countdown()}on=true;$('[data-go]',b).textContent='Duraklat';
+  stop=loop(dt=>{pos+=(+$('[data-sp]',b).value)*9*dt;place();if(pos>T.offsetHeight){halt();if(fromStart){fromStart=false;award('prompter',30,'Prompter okuması')}pos=0;place();return false}})};
 }});
 
 mod('sondakika',{t:'Son dakika anonsu',s:'Kırmızı bant, canlı kayıt',i:'🔴',xp:40,group:'canli',render(b){
