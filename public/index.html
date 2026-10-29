@@ -566,6 +566,10 @@ input[type=range]{accent-color:var(--pri)}
 .xppill i .ice{width:15px;height:15px;vertical-align:0}
 .circ .ice{width:20px;height:20px;vertical-align:0}
 .act .ic{width:26px;height:26px}
+.micsel{width:100%;font:inherit;font-size:15px;font-weight:600;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.micp .check{margin:10px 0 0}.micp .check span{display:block}.micp .check small{font-stretch:100%;font-weight:400;line-height:1.35}
+.prompter .pcam{position:absolute;right:10px;bottom:10px;width:32%;max-width:160px;aspect-ratio:3/4;object-fit:cover;border-radius:12px;z-index:3;transform:scaleX(-1);box-shadow:0 0 0 2px #fff6}
+.prompter .prec{position:absolute;left:10px;top:10px;z-index:3;background:var(--tally);color:#fff;font-weight:800;font-size:12px;padding:3px 8px;border-radius:6px}
 </style>
 </head>
 <body>
@@ -780,6 +784,7 @@ const L={
  ob_tagline:['Spikerlik ve sunuculuk stüdyosu','Diktorluq və aparıcılıq studiyası','Дикторлық және жүргізушілік студиясы','Дикторлук жана алып баруучулук студиясы','Diktorlik va boshlovchilik studiyasi','Diktorlyk we alyp barmak studiýasy','Announcer and presenter studio'],
  tw_busy:['Tekerlemeler hazırlanıyor…','Dilçaşdıranlar hazırlanır…','Жаңылтпаштар дайындалуда…','Жаңылмачтар даярдалууда…','Tez aytishlar tayyorlanmoqda…','Dildüwmeler taýýarlanýar…','Preparing tongue twisters in your language…'],
  tw_fail:['Bu dilde tekerleme hazırlanamadı; Türkçe tekerlemeler gösteriliyor.','Bu dildə dilçaşdıran hazırlanmadı; türkcə dilçaşdıranlar göstərilir.','Бұл тілде жаңылтпаш дайындалмады; түрікше жаңылтпаштар көрсетілуде.','Бул тилде жаңылмач даярдалган жок; түркчө жаңылмачтар көрсөтүлүүдө.','Bu tilda tez aytish tayyorlanmadi; turkcha tez aytishlar koʻrsatilmoqda.','Bu dilde dildüwme taýýarlanmady; türkçe dildüwmeler görkezilýär.','Couldn’t prepare tongue twisters in this language; showing Turkish ones.'],
+ m_mikrofon:['Mikrofon ayarları','Mikrofon ayarları','Микрофон баптаулары','Микрофон жөндөөлөрү','Mikrofon sozlamalari','Mikrofon sazlamalary','Microphone settings'],
  g_retry:['Tekrar dene','Yenidən cəhd et','Қайталап көру','Кайра аракет кылуу','Qayta urinish','Täzeden synanyş','Try again']
 };
 function tl(k,v){const a=L[k];let s=a?(a[LI()]||a[0]):k;if(v)for(const x in v)s=s.split('{'+x+'}').join(v[x]);return s}
@@ -796,9 +801,54 @@ const sleep=ms=>new Promise(r=>after(ms,r));
 
 /* ---------- mic / recorder / camera ---------- */
 const Mic={an:null,stream:null,ctx:null,buf:null,sim:0,
-  async start(){if(this.an)return true;try{this.stream=await navigator.mediaDevices.getUserMedia({audio:true});const AC=window.AudioContext||window.webkitAudioContext;this.ctx=new AC();const s=this.ctx.createMediaStreamSource(this.stream);this.an=this.ctx.createAnalyser();this.an.fftSize=1024;s.connect(this.an);this.buf=new Float32Array(this.an.fftSize);this.err=null;return true}catch(e){this.err=mediaErr(e,'microphone');return false}},
+  async start(){if(this.an)return true;try{const o=await openAudio(false);this.raw=o.raw;this.stream=o.stream;this.ctx=o.ctx;this.an=o.an;this.buf=new Float32Array(this.an.fftSize);this.err=null;return true}catch(e){this.err=mediaErr(e,'microphone');return false}},
   level(){if(!this.an)return this.sim;this.an.getFloatTimeDomainData(this.buf);let s=0;for(let i=0;i<this.buf.length;i++)s+=this.buf[i]*this.buf[i];return Math.min(1,Math.sqrt(s/this.buf.length)*6)},
-  stop(){if(this.stream)this.stream.getTracks().forEach(t=>t.stop());if(this.ctx)try{this.ctx.close()}catch(e){}this.an=this.stream=this.ctx=null;this.sim=0}};
+  stop(){[this.stream,this.raw].forEach(st=>st&&st.getTracks().forEach(t=>t.stop()));if(this.ctx)try{this.ctx.close()}catch(e){}this.an=this.stream=this.raw=this.ctx=null;this.sim=0}};
+/* ---------- microphone settings (device, processing, input level) ---------- */
+const MICDEF={dev:'',ns:true,ec:true,agc:true,gain:1};
+const micCfg=()=>Object.assign({},MICDEF,S.mic||{});
+function audioC(c){c=c||micCfg();const a={echoCancellation:!!c.ec,noiseSuppression:!!c.ns,autoGainControl:!!c.agc};if(c.dev)a.deviceId={exact:c.dev};return a}
+async function gumAudio(video,cfg){const ask=()=>navigator.mediaDevices.getUserMedia(video?{audio:audioC(cfg),video:{facingMode:'user'}}:{audio:audioC(cfg)});
+ try{return await ask()}catch(e){const c=cfg||micCfg();if(c.dev&&e&&(e.name==='OverconstrainedError'||e.name==='NotFoundError')){c.dev='';if(!cfg){S.mic=Object.assign(micCfg(),{dev:''});save()}return ask()}throw e}}
+/* opens the mic with the saved settings; returns the processed stream (input level applied), its analyser and a stop() */
+async function openAudio(video,cfg){const c=cfg||micCfg();const raw=await gumAudio(video,cfg);const AC=window.AudioContext||window.webkitAudioContext;const ctx=new AC();try{if(ctx.state==='suspended')ctx.resume()}catch(e){}
+ const src=ctx.createMediaStreamSource(new MediaStream(raw.getAudioTracks()));const g=ctx.createGain();g.gain.value=+c.gain||1;src.connect(g);const an=ctx.createAnalyser();an.fftSize=1024;g.connect(an);
+ let stream=raw;if((+c.gain||1)!==1){const d=ctx.createMediaStreamDestination();g.connect(d);stream=new MediaStream([...d.stream.getAudioTracks(),...raw.getVideoTracks()])}
+ return{raw,stream,ctx,an,gain:g,stop(){[raw,stream].forEach(st=>st.getTracks().forEach(t=>t.stop()));try{ctx.close()}catch(e){}}}}
+const pickMime=video=>{const L=video?['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm']:['audio/mp4','audio/webm;codecs=opus','audio/webm'];try{for(const m of L)if(window.MediaRecorder&&MediaRecorder.isTypeSupported(m))return m}catch(e){}return ''};
+function micPanel(box,{onDone,doneLabel}={}){
+ const c=micCfg();let live=null,raf=0,closed=false,peak=0;
+ box.innerHTML=`<div class="micp">
+  <label class="f" for="mic_dev">Mikrofon</label><select id="mic_dev" class="micsel" data-dev><option value="">Varsayılan mikrofon</option></select>
+  <div class="meter big" style="margin-top:12px"><div class="zone" style="left:35%;width:45%"></div><i data-lv></i></div>
+  <p class="note" data-lvt style="margin:6px 0 0">Normal sesinle konuş; çubuk yeşil bölgede kalmalı.</p>
+  <label class="f" for="mic_gain">Giriş seviyesi <output data-go>${Math.round(c.gain*100)}%</output></label><input type="range" id="mic_gain" min="50" max="250" step="10" value="${Math.round(c.gain*100)}" data-gain>
+  <label class="check"><input type="checkbox" data-ns ${c.ns?'checked':''}><span><b>Gürültü azaltma</b><small>Ortam sesini bastırır. Sessiz bir odada ve iyi bir mikrofonla kapatabilirsin.</small></span></label>
+  <label class="check"><input type="checkbox" data-ec ${c.ec?'checked':''}><span><b>Yankı engelleme</b><small>Hoparlörden gelen sesin mikrofona dönmesini önler. Kulaklık takmıyorsan açık tut.</small></span></label>
+  <label class="check"><input type="checkbox" data-agc ${c.agc?'checked':''}><span><b>Otomatik ses seviyesi</b><small>Sesini otomatik yükseltip alçaltır. Ses seviyesi alıştırmalarında doğru ölçüm için kapatman önerilir.</small></span></label>
+  <div class="row-btns"><button class="btn ghost sm" data-test>🎙 3 saniyelik test kaydı</button></div><div data-tres></div>
+  <p class="note" data-merr style="color:var(--tally)"></p>
+  <div class="row-btns"><button class="btn" data-save>${doneLabel||'Kaydet'}</button><button class="btn ghost" data-reset>Varsayılana dön</button></div></div>`;
+ const q=k=>$(k,box);
+ const read=()=>({dev:q('[data-dev]').value,gain:+q('[data-gain]').value/100,ns:q('[data-ns]').checked,ec:q('[data-ec]').checked,agc:q('[data-agc]').checked});
+ const stopLive=()=>{cancelAnimationFrame(raf);if(live){live.stop();live=null}};
+ async function listDevs(){try{const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput'&&d.deviceId&&d.deviceId!=='default'&&d.deviceId!=='communications');const sel=q('[data-dev]');const cur=sel.value||c.dev;
+  sel.innerHTML='<option value="">Varsayılan mikrofon</option>'+ds.map((d,i)=>`<option value="${esc(d.deviceId)}">${esc(d.label||('Mikrofon '+(i+1)))}</option>`).join('');if(ds.some(d=>d.deviceId===cur))sel.value=cur}catch(e){}}
+ async function restart(){stopLive();if(closed)return;q('[data-merr]').textContent='';
+  try{live=await openAudio(false,read())}catch(e){q('[data-merr]').textContent=MEDIA_MSG[mediaErr(e,'microphone')]||MEDIA_MSG.other;return}
+  if(closed){stopLive();return}await listDevs();const buf=new Float32Array(live.an.fftSize);let sm=0;
+  const tick=()=>{if(!live||closed)return;live.an.getFloatTimeDomainData(buf);let x=0,pk=0;for(let i=0;i<buf.length;i++){x+=buf[i]*buf[i];pk=Math.max(pk,Math.abs(buf[i]))}const lv=Math.min(1,Math.sqrt(x/buf.length)*6);sm=sm*.8+lv*.2;peak=Math.max(peak*.97,pk);
+   q('[data-lv]').style.width=(sm*100)+'%';q('[data-lvt]').textContent=peak>.98?'Çok yüksek, ses bozuluyor: giriş seviyesini düşür ya da mikrofondan biraz uzaklaş.':sm<.05?'Ses gelmiyor ya da çok kısık. Konuşmayı dene; gerekirse giriş seviyesini artır.':sm>.8?'Biraz yüksek; seviyeyi azıcık düşürebilirsin.':'Seviye iyi.';raf=requestAnimationFrame(tick)};tick()}
+ q('[data-dev]').onchange=restart;['[data-ns]','[data-ec]','[data-agc]'].forEach(k=>q(k).onchange=restart);
+ q('[data-gain]').oninput=e=>{q('[data-go]').textContent=e.target.value+'%';if(live)live.gain.gain.value=+e.target.value/100};
+ q('[data-test]').onclick=async()=>{if(!live||!window.MediaRecorder)return;const bt=q('[data-test]');bt.disabled=true;const st=live.stream===live.raw?live.raw:live.stream;
+  const mt=pickMime(false);let mr;try{mr=mt?new MediaRecorder(st,{mimeType:mt}):new MediaRecorder(st)}catch(e){bt.disabled=false;return}const ch=[];mr.ondataavailable=e=>e.data.size&&ch.push(e.data);
+  mr.onstop=()=>{const u=URL.createObjectURL(new Blob(ch,{type:mr.mimeType||mt||'audio/webm'}));q('[data-tres]').innerHTML=`<audio controls src="${u}"></audio><p class="note">Dinle: sesin net mi, boğuk mu, cızırtı var mı? Ayarı değiştirip tekrar dene.</p>`;bt.disabled=false;bt.textContent='🎙 3 saniyelik test kaydı'};
+  mr.start();for(let n=3;n>0;n--){bt.textContent='● Kaydediliyor… '+n;await new Promise(r=>setTimeout(r,1000))}if(mr.state!=='inactive')mr.stop()};
+ q('[data-reset]').onclick=()=>{q('[data-dev]').value='';q('[data-gain]').value=100;q('[data-go]').textContent='100%';q('[data-ns]').checked=q('[data-ec]').checked=q('[data-agc]').checked=true;restart()};
+ const finish=()=>{closed=true;stopLive()};
+ q('[data-save]').onclick=()=>{S.mic=read();save();finish();toast('Mikrofon ayarların kaydedildi');onDone&&onDone()};
+ restart();return finish}
 const Rec={mr:null,chunks:[],
   start(){if(!Mic.stream||!window.MediaRecorder)return false;this.chunks=[];try{this.mr=new MediaRecorder(Mic.stream)}catch(e){return false}this.mr.ondataavailable=e=>{if(e.data.size)this.chunks.push(e.data)};this.mr.start();return true},
   stop(){return new Promise(res=>{if(!this.mr||this.mr.state==='inactive')return res(null);this.mr.onstop=()=>{const bl=new Blob(this.chunks,{type:this.mr.mimeType||'audio/webm'});this.last=bl;res(URL.createObjectURL(bl))};this.mr.stop()})}};
@@ -898,13 +948,46 @@ const YN=[
 ];
 const TWISTERS=['Şu köşe yaz köşesi, şu köşe kış köşesi, ortada su şişesi.','Bir berber bir berbere, bre berber gel beraber bir berber dükkânı açalım demiş.','Dal sarkar kartal kalkar, kartal kalkar dal sarkar.','Şemsi Paşa pasajında sesi büzüşesiceler.','Kırk küp, kırkının da kulpu kırık küp.','Bu yoğurdu sarımsaklasak da mı saklasak, sarımsaklamasak da mı saklasak?','Çekoslovakyalılaştıramadıklarımızdan mısınız?','Al şu takatukaları takatukacıya götür; takatukacı takatukaları takatukalayamazsa geri getir.','Şişli’de şişman şişeci, şişe şişe şişe taşır.','Kırk kırık kiremit, kırk kırık kiremidin kırığını kırar.','Çarşıda çarşaf çarpan çarşafçı, çarşafı çarşaf çarpana çarptırdı.','Rıza’nın arabası Rize’de, Rıfat’ın arabası Ordu’da.','Fırıncı fırını fırında, fırıncı fırında fırını fırınlar.','Dört daldan dört dal düştü, dört dal dört daldan düştü.'];
 const GQ=[
- {q:'“Dağ” kelimesinde ğ nasıl seslendirilir?',o:['Önceki ünlü uzar: “da:”','“dag” gibi g sesiyle','“day” gibi y sesiyle'],a:0,w:'Kalın ünlüden sonra ve hece sonunda ğ kendisi okunmaz, önceki ünlüyü uzatır.'},
- {q:'“Yağmur” nasıl okunur?',o:['“yamur”','“ya:mur”','“yağğmur” gibi vurgulu'],a:1,w:'Ünsüzden önce gelen ğ, kendinden önceki ünlüyü uzatır: ya:mur.'},
- {q:'“Ağaç” kelimesinin doğru söylenişi hangisi?',o:['“a:aç”, iki a arasında yumuşak geçiş','“agaç”','“ayaç”'],a:0,w:'Aynı iki kalın ünlü arasında ğ, sesleri birbirine yumuşakça bağlar; g ya da y sesi çıkmaz.'},
- {q:'Türkçede ğ ile başlayan kelime var mıdır?',o:['Evet, birkaç tane','Hayır, yoktur','Sadece alıntı kelimelerde'],a:1,w:'Ğ hiçbir Türkçe kelimenin başında bulunmaz.'},
- {q:'“Doğru” kelimesi nasıl okunur?',o:['“dooru” gibi o uzatılarak','“dogru”','“doyru”'],a:0,w:'Ğ, ünsüzden önce önceki ünlüyü uzatır: do:ru.'},
- {q:'“Öğretmen” kelimesinde ğ ne yapar?',o:['Hiçbir etkisi yoktur, “öretmen” denir','Ö sesini uzatır: “ö:retmen”','“öyretmen” diye y okunur'],a:1,w:'İnce ünlüden sonra ünsüzden önce gelen ğ de önceki ünlüyü uzatır.'}
+ /* a + ğ + ı: a uzar, ı düşer (RTÜK Telaffuz Sözlüğü: ağır → a:r, ağız → a:z) */
+ {t:'agi',q:'“Ağır” kelimesi nasıl okunur?',o:['“a:r”: a uzar, ı düşer','“a:ır”: a uzar, ı da okunur','“ayır” gibi y sesiyle'],a:0,w:'a + ğ + ı birleşiminde ğ okunmaz; a uzar ve ı düşer: a:r. RTÜK Telaffuz Sözlüğü de “ağır” için a:r verir.'},
+ {t:'agi',q:'“Ağız” kelimesinin doğru söylenişi hangisi?',o:['“agız”','“a:z”','“ayız”'],a:1,w:'a + ğ + ı: ğ okunmaz, a uzar, ı düşer. RTÜK’e göre söyleniş a:z.'},
+ {t:'agi',q:'“Sağır” nasıl söylenir?',o:['“sa:r”','“sayır”','“sagır”'],a:0,w:'a + ğ + ı kuralı: a uzar, ı düşer → sa:r.'},
+ {t:'agi',q:'“Kâğıt” kelimesi nasıl okunur?',o:['“kâyıt”','“kâgıt”','“kâ:t”'],a:2,w:'a + ğ + ı kuralı: ğ ve ı söylenmez, a uzar → kâ:t.'},
+ {t:'agi',q:'“Aşağı” kelimesinin söylenişi hangisi?',o:['“aşa:”','“aşayı”','“aşağğı” vurgulu'],a:0,w:'Kelime sonundaki a + ğ + ı da aynı kurala uyar: aşa:.'},
+ {t:'agi',q:'“Buzağı” nasıl okunur?',o:['“buzayı”','“buza:”','“buzagı”'],a:1,w:'a + ğ + ı: a uzar, ı düşer → buza:.'},
+ {t:'agi',q:'“Kırağı” kelimesinin doğru söylenişi?',o:['“kıra:”','“kırayı”','“kıragı”'],a:0,w:'a + ğ + ı: ğ ve ı söylenmez, a uzar → kıra:.'},
+ {t:'agi',q:'“Bağırmak” nasıl söylenir?',o:['“bayırmak”','“ba:ırmak”','“ba:rmak”'],a:2,w:'Kelime içindeki a + ğ + ı da aynı şekilde okunur: ba:rmak.'},
+ {t:'agi',q:'“Bağırsak” kelimesi nasıl okunur?',o:['“ba:rsak”','“bağrsak” g sesiyle','“bayırsak”'],a:0,w:'a + ğ + ı: a uzar, ı düşer → ba:rsak.'},
+ {t:'agi',q:'“Yağış” nasıl söylenir?',o:['“yayış”','“ya:ş”','“yagış”'],a:1,w:'a + ğ + ı: ğ ve ı söylenmez, a uzar → ya:ş.'},
+ {t:'agi',q:'a + ğ + ı birleşiminde ne olur?',o:['ğ, y sesine dönüşür','a uzar, ğ ve ı söylenmez','ı uzar, a kısalır'],a:1,w:'Kural: a + ğ + ı → uzun a. Örnek: ağır → a:r, kâğıt → kâ:t, aşağı → aşa:.'},
+ {t:'agi',q:'Hangi kelimede a + ğ + ı kuralı uygulanır?',o:['Yağmur','Ağaç','Sağır'],a:2,w:'Sağır’da ğ, a ile ı arasındadır → sa:r. Yağmur’da ğ ünsüzden önce, ağaç’ta iki a arasındadır.'},
+ {t:'agi',q:'Hangi kelimede a + ğ + ı birleşimi vardır?',o:['Kâğıt','Doğru','Eğitim'],a:0,w:'Kâğıt: a + ğ + ı → kâ:t. Doğru’da ğ ünsüzden önce, eğitim’de e ile i arasındadır.'},
+ {t:'agi',q:'“Aşağı in, kâğıdı al.” cümlesinin doğru söylenişi hangisi?',o:['“Aşayı in, kâyıdı al.”','“Aşa: in, kâ:dı al.”','“Aşağı in, kâgıdı al.” (g sesiyle)'],a:1,w:'İki kelimede de a + ğ + ı var: aşa:, kâ:dı. Ğ ve ı söylenmez, a uzar.'},
+ {t:'agi',q:'“Ağır yağış” sözü haberde nasıl okunur?',o:['“a:r ya:ş”','“ayır yayış”','“a:ır ya:ış”'],a:0,w:'İki kelimede de a + ğ + ı kuralı: a:r ya:ş.'},
+ {t:'agi',q:'Spiker “ağız” kelimesini “a-ğız” diye g sesiyle okursa ne olur?',o:['Doğru okumuş olur','Yerel ağız etkisi duyulur; doğrusu “a:z”','Sadece şiirde doğrudur'],a:1,w:'Standart söyleyişte ğ okunmaz. a + ğ + ı kuralıyla doğrusu a:z.'},
+ /* genel ğ kuralları */
+ {t:'gen',q:'Türkçede ğ ile başlayan kelime var mıdır?',o:['Evet, birkaç tane','Hayır, yoktur','Sadece alıntı kelimelerde'],a:1,w:'Ğ hiçbir Türkçe kelimenin başında bulunmaz.'},
+ {t:'gen',q:'“Dağ” kelimesinde ğ nasıl seslendirilir?',o:['Önceki ünlü uzar: “da:”','“dag” gibi g sesiyle','“day” gibi y sesiyle'],a:0,w:'Hece sonundaki ğ kendisi okunmaz, önceki ünlüyü uzatır.'},
+ {t:'gen',q:'“Yağmur” nasıl okunur?',o:['“yamur”','“ya:mur”','“yağğmur” gibi vurgulu'],a:1,w:'Ünsüzden önce gelen ğ, kendinden önceki ünlüyü uzatır: ya:mur.'},
+ {t:'gen',q:'“Ağaç” kelimesinin doğru söylenişi hangisi?',o:['“a:ç”','“agaç”','“ayaç”'],a:0,w:'İki a arasındaki ğ okunmaz, sesler tek uzun a olur. RTÜK Telaffuz Sözlüğü: a:ç.'},
+ {t:'gen',q:'“Doğru” kelimesi nasıl okunur?',o:['“do:ru”','“dogru”','“doyru”'],a:0,w:'Ğ, ünsüzden önce önceki ünlüyü uzatır: do:ru.'},
+ {t:'gen',q:'“Öğretmen” kelimesinde ğ ne yapar?',o:['Hiçbir etkisi yoktur, “öretmen” denir','Ö sesini uzatır: “ö:retmen”','“öyretmen” diye y okunur'],a:1,w:'İnce ünlüden sonra ünsüzden önce gelen ğ de önceki ünlüyü uzatır.'},
+ {t:'gen',q:'“Sağlam” nasıl söylenir?',o:['“saglam”','“sa:lam”','“saylam”'],a:1,w:'Ünsüzden önceki ğ okunmaz, a uzar: sa:lam.'},
+ {t:'gen',q:'“İğne” kelimesinin söylenişi?',o:['“i:ne”','“igne”','“iyine”'],a:0,w:'Ünsüzden önceki ğ önceki ünlüyü uzatır: i:ne.'},
+ {t:'gen',q:'“Eğitim” nasıl okunur?',o:['“e:itim”','“eyitim”','“egitim”'],a:1,w:'e ile i arasındaki ğ, y sesiyle söylenir: eyitim.'},
+ {t:'gen',q:'“Değer” kelimesi nasıl söylenir?',o:['“deyer”','“de:er”','“deger”'],a:0,w:'e ile e arasındaki ğ, y sesiyle söylenir: deyer.'},
+ {t:'gen',q:'“Beğenmek” nasıl okunur?',o:['“be:nmek”','“begenmek”','“beyenmek”'],a:2,w:'e ile e arasındaki ğ, y sesine dönüşür: beyenmek.'},
+ {t:'gen',q:'“Eğer” bağlacının söylenişi?',o:['“eyer”','“e:r”','“eger”'],a:0,w:'e ile e arasındaki ğ, y sesiyle söylenir: eyer.'},
+ {t:'gen',q:'e ile i (ya da iki e) arasındaki ğ nasıl söylenir?',o:['Okunmaz, önceki ünlü uzar','y sesiyle','g sesiyle'],a:1,w:'İnce e ile i/e arasında ğ, y sesi gibi söylenir: eğitim → eyitim, değer → deyer.'},
+ {t:'gen',q:'“Değil” kelimesinin söylenişi hangisi?',o:['“deyil”','“diil”','“de:l”'],a:1,w:'“Değil” bilinen bir istisnadır, “diil” diye söylenir.'},
+ {t:'gen',q:'“Düğün” nasıl okunur?',o:['“düyün”','“dügün”','“dü:n”'],a:2,w:'İki aynı ünlü (ü) arasındaki ğ okunmaz, ünlü uzar: dü:n.'},
+ {t:'gen',q:'“Sığır” kelimesinin söylenişi?',o:['“sı:r”','“sıyır”','“sıgır”'],a:0,w:'İki ı arasındaki ğ okunmaz, ı uzar: sı:r.'},
+ {t:'gen',q:'Ğ hangi konumda asla bulunmaz?',o:['Kelime sonunda','Kelime başında','İki ünlü arasında'],a:1,w:'Ğ kelime başında bulunmaz; kelime sonunda (dağ) ve ünlüler arasında (ağaç) bulunabilir.'}
 ];
+/* her gün yenilenen set: 5 soru a + ğ + ı kuralından, 3 soru genel kurallardan */
+const G_DAILY={agi:5,gen:3};
+function gDaily(){const out=[];for(const t in G_DAILY){const pool=GQ.filter(x=>x.t===t);pickIdx(pool.length,G_DAILY[t],'GQ_'+t).forEach(i=>out.push(pool[i]))}
+ return out.map(q=>{const ord=shuffle(q.o.map((_,k)=>k));return Object.assign({},q,{o:ord.map(k=>q.o[k]),a:ord.indexOf(q.a)})})}
 const ART={
  dil:[['Dil ucunu üst dişlerin arkasına değdir, hızlanarak “la-la-la” de',12],['Dili sırayla sağ ve sol yanağa bastır',10],['Dili dışarı çıkar; burna ve çeneye doğru uzat',10],['“Ta-da-na-la” serisini net ve hızlı tekrarla',12]],
  dudak:[['Dudakları öne uzatıp “u”, yanlara gerip “i” de',12],['Dudakları titret: “brrr”, nefesin yettiğince',10],['“Pa-ba-ma” hecelerini patlatarak söyle',12],['Dudaklar kapalı, “mmm” ile mırıldan',10]],
@@ -1065,10 +1148,12 @@ mod('duygu',{t:'Duygu yönetimi',s:'Aynı cümle, altı duygu',i:'🎭',xp:30,gr
  $('[data-ok]',b).onclick=()=>{got.add(cur[0]);drawGot();$('[data-ok]',b).disabled=true;if(got.size===6){award('duygu',30,'Altı duygu tamamlandı')}};
 }});
 
+mod('mikrofon',{t:'Mikrofon ayarları',s:'Cihaz, seviye ve ses işleme',i:'🎚',xp:0,render(b){const fin=micPanel(b,{onDone:()=>closeSheet()});onClose(fin)}});
 mod('g',{t:'Ğ kullanımı',s:'Yumuşak g’nin doğru söylenişi',i:'ğ',xp:30,group:'akademi',render(b){
- let i=0,score=0;const qs=shuffle(GQ);
- const draw=()=>{if(i>=qs.length){b.innerHTML=`<div class="result"><div class="emo">${score}/${qs.length}</div><p>${score>=5?'Ğ ile aran çok iyi.':'Kuralı bir kez daha oku, sonra tekrar dene.'}</p><p class="note">Kural: Ğ asla kelime başında olmaz. Çoğunlukla kendinden önceki ünlüyü uzatır ya da iki ünlüyü yumuşakça bağlar; g veya y gibi okunmaz.</p><button class="btn" data-again>Tekrar oyna</button></div>`;$('[data-again]',b).onclick=()=>{i=0;score=0;draw()};award('g',score*5,'Ğ testi');return}
-  const q=qs[i];b.innerHTML=`<p class="note">Soru ${i+1} / ${qs.length}</p><h2 class="x" style="font-size:22px;margin:6px 0 14px;line-height:1.2">${q.q}</h2>${q.o.map((o,k)=>`<button class="opt" data-o="${k}">${o}</button>`).join('')}<div data-x></div>`;
+ let i=0,score=0;let qs=shuffle(gDaily());
+ const rule=`<div class="card" style="margin:0 0 14px;padding:12px 14px"><b>Bugünün odağı: a + ğ + ı</b><p class="note" style="margin:4px 0 0">ğ, a ile ı arasında geldiğinde okunmaz; a uzar, ı düşer: ağır → a:r, kâğıt → kâ:t, aşağı → aşa:. Sorular her gece 00.00’da yenilenir.</p></div>`;
+ const draw=()=>{if(i>=qs.length){const good=score>=Math.ceil(qs.length*.75);b.innerHTML=`<div class="result"><div class="emo">${score}/${qs.length}</div><p>${good?'Ğ ile aran çok iyi.':'Kuralı bir kez daha oku, sonra tekrar dene.'}</p><p class="note">Kurallar: Ğ kelime başında olmaz. Hece sonunda ve ünsüzden önce önceki ünlüyü uzatır (dağ → da:, yağmur → ya:mur). a + ğ + ı’da a uzar, ı düşer (ağır → a:r). e ile i/e arasında y sesi gibi okunur (eğitim → eyitim). “Değil” istisnadır: diil. Yarın yeni sorular gelecek.</p><button class="btn" data-again>Tekrar oyna</button></div>`;$('[data-again]',b).onclick=()=>{i=0;score=0;qs=shuffle(gDaily());draw()};award('g',Math.round(score*30/qs.length),'Ğ testi');return}
+  const q=qs[i];b.innerHTML=`${i===0?rule:''}<p class="note">Soru ${i+1} / ${qs.length}${q.t==='agi'?' · a + ğ + ı':''}</p><h2 class="x" style="font-size:22px;margin:6px 0 14px;line-height:1.2">${q.q}</h2>${q.o.map((o,k)=>`<button class="opt" data-o="${k}">${o}</button>`).join('')}<div data-x></div>`;
   $$('[data-o]',b).forEach(btn=>btn.onclick=()=>{const k=+btn.dataset.o;$$('[data-o]',b).forEach(x=>{x.disabled=true;if(+x.dataset.o===q.a)x.classList.add('right')});if(k===q.a)score++;else btn.classList.add('wrong');$('[data-x]',b).innerHTML=`<div class="explain">${q.w}</div><button class="btn" data-n>Sonraki</button>`;$('[data-n]',b).onclick=()=>{i++;draw()}})};
  draw();
 }});
@@ -1127,18 +1212,39 @@ mod('prompter',{t:'Prompter',s:'Metin seç, hızı ayarla, oku',i:'📜',xp:30,g
   <label class="f">Okuma süresi</label><div class="chips" data-len style="margin:0"></div>
   <label class="f" for="aitopic">Konu (isteğe bağlı)</label><input type="text" id="aitopic" maxlength="120" placeholder="Örnek: şehirde yeni bisiklet yolları">
   <div class="row-btns" style="margin-bottom:0"><button class="btn sm" data-aigen>Metni üret</button></div><p class="note" data-aist style="margin:8px 0 0" hidden></p></details>
- <div class="prompter" data-p><div class="guide"></div><div class="txt" data-txt></div></div>
+ <div class="prompter" data-p><div class="guide"></div><div class="txt" data-txt></div><video class="pcam" data-pcam muted playsinline hidden></video><span class="prec" data-prec hidden>● REC</span></div>
  <div class="ctrl"><span>Hız</span><input type="range" min="1" max="10" value="4" data-sp aria-label="Kayma hızı"><output data-spo>4</output></div>
  <div class="ctrl"><span>Yazı boyu</span><input type="range" min="20" max="44" value="30" data-fs aria-label="Yazı boyutu"><output data-fso>30</output></div>
+ <div class="ctrl" style="grid-template-columns:auto 1fr"><span>Kayıt</span><div class="chips" data-recm style="margin:0"></div></div>
  <div class="row-btns"><button class="btn rec" data-go>Başlat</button><button class="btn ghost" data-rs>Başa sar</button><button class="btn ghost" data-mr aria-pressed="false">Ayna modu</button></div>
+ <p class="note" data-rst hidden></p><div data-rres></div>
  <p class="note" data-info></p><div class="row-btns" style="margin-top:0"><button class="btn ghost sm" data-model hidden></button></div><div class="req trainer" data-tb hidden></div>`;
- let key=opts[0][0],pos=0,on=false,stop=null,fromStart=false;const P=$('[data-p]',b),T=$('[data-txt]',b);
+ let key=opts[0][0],pos=0,on=false,stop=null,fromStart=false;
+ /* recording while reading: off / audio / video */
+ let recM=S.prRec||'off',rc=null;const RECM=[['off','Kayıt yok'],['ses','🎙 Ses'],['video','🎥 Görüntülü']];
+ const drawRecM=()=>{$('[data-recm]',b).innerHTML=RECM.map(([k,n])=>`<button class="chip" data-rm="${k}" aria-pressed="${k===recM}">${n}</button>`).join('');$$('[data-rm]',b).forEach(c=>c.onclick=()=>{if(rc)return toast('Önce kaydı bitir ya da başa sar');recM=c.dataset.rm;S.prRec=recM;save();drawRecM()})};
+ const recStatus=()=>{const el=$('[data-rst]',b);if(!el)return;if(!rc){el.hidden=true;$('[data-prec]',b).hidden=true;return}el.hidden=false;$('[data-prec]',b).hidden=rc.paused;
+  el.innerHTML=`${rc.paused?'⏸ Kayıt duraklatıldı':'● Kaydediliyor'} · ${fmt(rc.acc+(rc.paused?0:(performance.now()-rc.t0)/1000))} <button class="btn ghost sm" data-rend style="margin-left:6px">■ Kaydı bitir</button>`;$('[data-rend]',b).onclick=()=>{halt();recFinish(false)}};
+ async function recBegin(){if(recM==='off'||!window.MediaRecorder)return;try{const o=await openAudio(recM==='video');const mt=pickMime(recM==='video');const mr=mt?new MediaRecorder(o.stream,{mimeType:mt}):new MediaRecorder(o.stream);
+   const ch=[];rc={o,mr,ch,acc:0,t0:performance.now(),paused:false,video:recM==='video',tick:setInterval(recStatus,500)};mr.ondataavailable=e=>{if(e.data.size)ch.push(e.data)};mr.start(1000);
+   if(rc.video){const v=$('[data-pcam]',b);v.srcObject=new MediaStream(o.raw.getVideoTracks());v.hidden=false;v.play().catch(()=>{})}recStatus()}
+  catch(e){rc=null;toast(MEDIA_MSG[mediaErr(e,recM==='video'?'camera':'microphone')]||MEDIA_MSG.other)}}
+ const recPause=()=>{if(!rc||rc.paused)return;try{rc.mr.pause()}catch(e){}rc.acc+=(performance.now()-rc.t0)/1000;rc.paused=true;recStatus()};
+ const recResume=()=>{if(!rc||!rc.paused)return;try{rc.mr.resume()}catch(e){}rc.t0=performance.now();rc.paused=false;recStatus()};
+ const recDrop=()=>{if(!rc)return;const r=rc;rc=null;clearInterval(r.tick);r.mr.onstop=null;try{if(r.mr.state!=='inactive')r.mr.stop()}catch(e){}r.o.stop();const v=$('[data-pcam]',b);if(v){v.srcObject=null;v.hidden=true}recStatus()};
+ function recFinish(full){if(!rc)return;const r=rc;rc=null;clearInterval(r.tick);if(!r.paused)r.acc+=(performance.now()-r.t0)/1000;const dur=r.acc;
+  r.mr.onstop=()=>{r.o.stop();const v=$('[data-pcam]',b);if(v){v.srcObject=null;v.hidden=true}recStatus();if(!b.isConnected)return;
+   const type=r.mr.mimeType||(r.video?'video/webm':'audio/webm');const blob=new Blob(r.ch,{type});if(!blob.size)return;const u=URL.createObjectURL(blob);onClose(()=>URL.revokeObjectURL(u));const tt=(opts.find(o=>o[0]===key)||opts[0])[1].t;
+   const box=$('[data-rres]',b);box.innerHTML=`<div class="result"><b>${full?'Okuma kaydın hazır':'Kayıt durduruldu'}</b> <span class="note">${fmt(dur)}</span>${r.video?`<video controls playsinline src="${u}" style="width:100%;border-radius:12px;margin-top:8px"></video>`:`<audio controls src="${u}"></audio>`}<p class="note">Dinle: tempo düzenli mi, nefes yerleri doğru mu, vurgular net mi?</p></div>`;
+   addPortBtn($('.result',box),blob,{title:'Prompter: '+String(tt).replace(/^✨ /,''),src:'canli',dur})};
+  try{r.mr.stop()}catch(e){r.mr.onstop()}}
+ onClose(recDrop);const P=$('[data-p]',b),T=$('[data-txt]',b);
  const text=()=>(opts.find(o=>o[0]===key)||opts[0])[1].x;
  const place=()=>{T.style.transform=`translateY(${P.clientHeight*.38-pos}px)`};
  const info=()=>{const w=text().split(/\s+/).length;$('[data-info]',b).textContent=`${w} kelime. Haber temposunda (dakikada 130 kelime) yaklaşık ${Math.round(w/130*60)} saniye.`};
  function refreshModel(){const vk='pr_'+key+'_'+S.lang,el=$('[data-tb]',b),mb=$('[data-model]',b);if(!(key in D('TEXTS'))){mb.hidden=true;el.hidden=true;el.innerHTML='';return}modelBtn(mb,vk);trainerBox(el,vk,{title:'Eğitmen: örnek okumayı kaydet',hint:'Öğrenciler “Eğitmenden dinle” ile bu metnin senin okumanı dinler.',script:text(),onchange:()=>modelBtn(mb,vk)})}
  const load=()=>{T.textContent=text();T.style.fontSize=$('[data-fs]',b).value+'px';pos=0;place();info();refreshModel()};load();
- const drawChips=()=>{$('[data-chips]',b).innerHTML=opts.map(([k,v])=>`<button class="chip" data-tx="${k}" aria-pressed="${k===key}">${esc(v.t)}</button>`).join('');$$('[data-tx]',b).forEach(c=>c.onclick=()=>{key=c.dataset.tx;drawChips();halt();load()})};drawChips();
+ const drawChips=()=>{$('[data-chips]',b).innerHTML=opts.map(([k,v])=>`<button class="chip" data-tx="${k}" aria-pressed="${k===key}">${esc(v.t)}</button>`).join('');$$('[data-tx]',b).forEach(c=>c.onclick=()=>{key=c.dataset.tx;drawChips();halt();recDrop();load()})};drawChips();drawRecM();
  const TYPES=[['haber','Haber bülteni','3–4 kısa haberden oluşan ana haber bülteni; açılış ve haberler arası geçiş cümleleriyle'],['hava','Hava durumu','bölgelere göre hava durumu sunumu'],['spor','Spor bülteni','maç sonuçları ve spor haberlerinden oluşan bülten'],['sondakika','Son dakika','son dakika anonsu; kısa, net, paniksiz'],['belgesel','Belgesel','doğa, şehir ya da tarih belgeseli anlatımı'],['kultur','Kültür-sanat','kültür-sanat programı sunumu'],['etkinlik','Tören sunumu','bir tören ya da etkinlik sunucusu metni'],['reklam','Reklam','radyo reklamı ya da kamu spotu']];
  let ty='haber',len=60,gbusy=null;
  const drawAiChips=()=>{$('[data-ty]',b).innerHTML=TYPES.map(([k,n])=>`<button class="chip" data-y="${k}" aria-pressed="${k===ty}">${n}</button>`).join('');$('[data-len]',b).innerHTML=[30,60,90].map(n=>`<button class="chip" data-n="${n}" aria-pressed="${n===len}">${n} sn</button>`).join('');
@@ -1160,17 +1266,20 @@ Yalnızca şu JSON'u döndür, başka hiçbir şey yazma:
    try{const r=await sm.json(prompt,{signal:gbusy.signal,modelTier:'default',cache:false});
     const x=r&&typeof r.x==='string'?r.x.trim():'';if(x.split(/\s+/).length<20)throw {code:'bad'};
     S.genTexts.push({t:String(r.t||T[1]).slice(0,32),x:x.slice(0,3000)});if(S.genTexts.length>6)S.genTexts.shift();save();addAi();
-    key='ai'+(S.genTexts.length-1);drawChips();halt();load();toast('Yeni metin prompter’da');$('[data-aibox]',b).open=false;P.scrollIntoView({behavior:'smooth',block:'center'});
+    key='ai'+(S.genTexts.length-1);drawChips();halt();recDrop();load();toast('Yeni metin prompter’da');$('[data-aibox]',b).open=false;P.scrollIntoView({behavior:'smooth',block:'center'});
    }catch(e){if(e&&e.code==='not_granted'){$('[data-aibox]',b).hidden=true;return}if(!b.isConnected)return;stt.hidden=false;stt.textContent=e&&e.code==='rate_limited'?'Kısa bir süre sonra tekrar dene.':'Metin üretilemedi; tekrar dene.'}
    finally{gbusy=null;if(b.isConnected){btn.disabled=false;btn.textContent='Metni üret'}}};
   onClose(()=>{if(gbusy)gbusy.abort()})});
  $('[data-sp]',b).oninput=e=>$('[data-spo]',b).textContent=e.target.value;
  $('[data-fs]',b).oninput=e=>{$('[data-fso]',b).textContent=e.target.value;T.style.fontSize=e.target.value+'px'};
  $('[data-mr]',b).onclick=e=>{const m=P.classList.toggle('mirror');e.target.setAttribute('aria-pressed',m)};
- const halt=()=>{on=false;if(stop)stop();$('[data-go]',b).textContent='Başlat'};
- $('[data-rs]',b).onclick=()=>{halt();pos=0;place()};
- $('[data-go]',b).onclick=async()=>{if(on)return halt();if(pos>=T.offsetHeight){pos=0;place()}if(pos===0){fromStart=true;await countdown()}on=true;$('[data-go]',b).textContent='Duraklat';
-  stop=loop(dt=>{pos+=(+$('[data-sp]',b).value)*9*dt;place();if(pos>T.offsetHeight){halt();if(fromStart){fromStart=false;award('prompter',30,'Prompter okuması')}pos=0;place();return false}})};
+ const halt=()=>{on=false;if(stop)stop();recPause();$('[data-go]',b).textContent='Başlat'};
+ $('[data-rs]',b).onclick=()=>{halt();recDrop();pos=0;place()};
+ let starting=false;
+ $('[data-go]',b).onclick=async()=>{if(starting)return;if(on)return halt();if(pos>=T.offsetHeight){pos=0;place()}
+  starting=true;try{if(pos===0){fromStart=true;recDrop();$('[data-rres]',b).innerHTML='';await recBegin();if(rc)recPause();await countdown()}}finally{starting=false}
+  if(!b.isConnected)return;on=true;recResume();$('[data-go]',b).textContent='Duraklat';
+  stop=loop(dt=>{pos+=(+$('[data-sp]',b).value)*9*dt;place();if(pos>T.offsetHeight){halt();if(fromStart){fromStart=false;award('prompter',30,'Prompter okuması')}recFinish(true);pos=0;place();return false}})};
 }});
 
 mod('sondakika',{t:'Son dakika anonsu',s:'Kırmızı bant, canlı kayıt',i:'🔴',xp:40,group:'canli',render(b){
@@ -2033,7 +2142,7 @@ function render(){
   <div class="rundown">${LEVELS.map((l,i)=>`<div class="rd" style="cursor:default"><time>${l[0]}</time><span><b>${lvName(i)}</b></span><span class="st ${i<Lv.i?'ok':i===Lv.i?'now':''}">${i<=Lv.i?'✓':'🔒'}</span></div>`).join('')}</div>
   <label class="f" for="pn">${tl('p_name')}</label><input type="text" id="pn" value="${esc(S.name)}">
   <div class="sec"><h2>${tl('p_perm')}</h2><span>${S.perm==='granted'?tl('pm_ok'):S.perm==='mic'?tl('pm_mic'):S.perm==='policy'?tl('pm_policy'):tl('pm_no')}</span></div>
-  <button class="btn ghost sm" data-perm>${tl('p_permbtn')}</button>
+  <div class="row-btns" style="margin:8px 0 0"><button class="btn ghost sm" data-perm>${tl('p_permbtn')}</button><button class="btn ghost sm" data-open="mikrofon">🎚 Mikrofon ayarları</button></div>
   <div class="req trainer" data-wel hidden style="margin-top:18px"></div>
   <div class="row-btns"><button class="btn ghost sm" data-reset>${tl('p_reset')}</button></div>`;
   $('#pn').onchange=e=>{S.name=e.target.value.trim()||'Adınız Soyadınız';save();window.Cloud&&Cloud.saveName();render()};window.Cloud&&Cloud.accountCard($('[data-account]'));
@@ -2066,7 +2175,8 @@ function permGate(force){if(!force&&S.permDone)return;const old=$('.gate');if(ol
   if(p==='denied'&&why==='policy')p='policy';
   S.perm=p;S.permDone=true;save();
   if(p==='denied'||p==='policy'){$('[data-gm]',o).textContent=MEDIA_MSG[why]||MEDIA_MSG.other;btn.textContent=tl('g_retry');btn.disabled=false;btn.hidden=p==='policy';$('[data-skip]',o).textContent=tl('g_demo');return}
-  close()};
+  const gin=$('.gin',o);gin.innerHTML=`<h1 class="x">Mikrofonunu ayarla</h1><p class="lead">Konuşurken seviye çubuğunu izle; gerekirse mikrofonu ve ayarları değiştir. Bu ayarlar bütün alıştırmalarda kullanılır, sonra Profil’den değiştirebilirsin.</p><div data-mp></div><button class="btn ghost" data-later style="width:100%;margin-top:8px">Şimdilik atla</button>`;
+  const fin=micPanel($('[data-mp]',o),{doneLabel:'Kaydet ve başla',onDone:close});$('[data-later]',o).onclick=()=>{fin();close()}};
  $('[data-skip]',o).onclick=()=>{S.permDone=true;if(!S.perm)S.perm='skipped';save();close()};
 }
 /* ---------- logo: tally light broadcasting over test-card bars ---------- */
