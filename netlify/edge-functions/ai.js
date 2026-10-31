@@ -1,9 +1,11 @@
 // Netlify Edge Function: /api/ai → Google Gemini (yanıt akış olarak gelir)
 // Gerekli ortam değişkeni: GEMINI_API_KEY  (https://aistudio.google.com/apikey adresinden ücretsiz)
-// İsteğe bağlı:
-//   GEMINI_MODEL    — önce denenecek model
+// Önerilen (kötüye kullanımı engeller):
+//   SUPABASE_URL, SUPABASE_ANON_KEY — günlük kullanım sınırı için (public/config.js'teki değerlerin aynısı)
 //   ALLOWED_ORIGIN  — virgülle ayrılmış izinli adresler, örn. https://yayindasin.netlify.app
-// Teşhis: tarayıcıda  /api/ai?test=1  aç (her model için süre ve durum gösterir).
+//   DIAG_KEY        — teşhis sayfasının şifresi: /api/ai?test=DIAG_KEY
+// İsteğe bağlı:
+//   AI_USER_DAILY (varsayılan 300), AI_GUEST_DAILY (varsayılan 150), IP_SALT, GEMINI_MODEL
 
 const MAX_CHARS = 60000;
 // Hız öncelikli sıra: flash-lite hem hızlı hem bu işler için yeterli; yoğunsa diğerlerine geçilir.
@@ -82,8 +84,40 @@ async function callModel(m, key, messages, wantJson, stream) {
   return { status: 400, err: 'istek reddedildi' };
 }
 
-async function diagnose(key) {
-  const out = { anahtar_tanimli: !!key, izinli_adres: env('ALLOWED_ORIGIN') || '(tanımlı değil — her yerden çalışır)', modeller: {} };
+// ---------- günlük kullanım sınırı (Supabase'deki ai_take fonksiyonu) ----------
+const SB_URL = () => env('SUPABASE_URL').replace(/\/+$/, '');
+const SB_KEY = () => env('SUPABASE_ANON_KEY');
+async function sha(s) {
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 40);
+}
+// Giriş yapmışsa hesap başına, yapmamışsa IP başına (IP saklanmaz, sadece özeti) sayar.
+async function takeQuota(req, context) {
+  if (!SB_URL() || !SB_KEY()) return { ok: true, skipped: 'Supabase ayarı yok' };
+  const ip = (context && context.ip) || req.headers.get('x-nf-client-connection-ip') || 'bilinmiyor';
+  const guest_key = await sha((env('IP_SALT') || 'yayindasin') + '|' + ip);
+  const body = JSON.stringify({ guest_key, lim_user: +env('AI_USER_DAILY') || 300, lim_guest: +env('AI_GUEST_DAILY') || 150 });
+  const call = jwt => fetch(SB_URL() + '/rest/v1/rpc/ai_take', {
+    method: 'POST', body,
+    headers: { 'Content-Type': 'application/json', apikey: SB_KEY(), ...(jwt ? { Authorization: 'Bearer ' + jwt } : {}) }
+  });
+  try {
+    const m = (req.headers.get('authorization') || '').match(/^Bearer\s+(\S+)$/);
+    let r = m ? await call(m[1]) : null;
+    if (!r || r.status === 401 || r.status === 403) r = await call(null); // oturum geçersizse misafir say
+    if (!r.ok) { console.log('Kota kontrolü yapılamadı', r.status, (await r.text()).slice(0, 200)); return { ok: true, skipped: 'rpc ' + r.status }; }
+    const left = await r.json();
+    return { ok: typeof left === 'number' && left >= 0, left, user: !!m };
+  } catch (e) {
+    console.log('Kota kontrolü yapılamadı', e.message);
+    return { ok: true, skipped: e.message }; // Supabase'e ulaşılamazsa hizmeti kesme
+  }
+}
+
+async function diagnose(key, req, context) {
+  const out = { anahtar_tanimli: !!key, izinli_adres: env('ALLOWED_ORIGIN') || '(tanımlı değil)', modeller: {} };
+  const q = await takeQuota(req, context);
+  out.gunluk_sinir = q.skipped ? 'ÇALIŞMIYOR: ' + q.skipped : `çalışıyor (bu ağ için bugün kalan hak: ${q.left})`;
   if (!key) return out;
   const all = [...new Set([...MODELS.default, ...MODELS.quick])];
   await Promise.all(all.map(async m => {
@@ -96,20 +130,26 @@ async function diagnose(key) {
   return out;
 }
 
-export default async (req) => {
+export default async (req, context) => {
   const key = env('GEMINI_API_KEY');
   const url = new URL(req.url);
 
   if (req.method === 'GET') {
-    if (url.searchParams.get('test')) return json(200, await diagnose(key));
+    const t = url.searchParams.get('test');
+    if (t) {
+      if (!env('DIAG_KEY')) return json(403, { error: "Teşhis kapalı. Netlify'da DIAG_KEY tanımla ve /api/ai?test=DIAG_KEY adresini aç." });
+      if (t !== env('DIAG_KEY')) return json(403, { error: 'Teşhis şifresi yanlış.' });
+      return json(200, await diagnose(key, req, context));
+    }
     return json(405, { error: 'Sadece POST', code: 'unavailable' });
   }
   if (req.method !== 'POST') return json(405, { error: 'Sadece POST', code: 'unavailable' });
 
   const allowed = env('ALLOWED_ORIGIN').split(',').map(norm).filter(Boolean);
   const origin = norm(req.headers.get('origin'));
-  if (allowed.length && origin && !allowed.includes(origin) && origin !== norm(url.origin)) {
-    return json(403, { error: 'Bu adresten istek kabul edilmiyor: ' + origin, code: 'unavailable' });
+  // Tarayıcılar POST isteğinde Origin başlığını her zaman gönderir; başlıksız istek betikten gelir
+  if (allowed.length && (!origin || (!allowed.includes(origin) && origin !== norm(url.origin)))) {
+    return json(403, { error: 'Bu adresten istek kabul edilmiyor: ' + (origin || '(başlık yok)'), code: 'unavailable' });
   }
   if (!key) return json(500, { error: 'GEMINI_API_KEY tanımlı değil', code: 'unavailable' });
 
@@ -118,6 +158,11 @@ export default async (req) => {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const total = messages.reduce((n, m) => n + String(m.content || '').length, 0);
   if (!messages.length || total > MAX_CHARS) return json(400, { error: 'İstek boş ya da çok uzun', code: 'unavailable' });
+
+  const quota = await takeQuota(req, context);
+  if (!quota.ok) {
+    return json(429, { error: quota.user ? 'Bugünkü yapay zekâ kullanım hakkın doldu.' : 'Bugünkü misafir kullanım hakkı doldu. Giriş yaparsan daha fazla kullanabilirsin.', code: 'daily_limit' });
+  }
 
   let upstream = null, used = '', lastStatus = 502, lastErr = '';
   const t0 = Date.now();

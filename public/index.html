@@ -2099,7 +2099,7 @@ function renderKayit(app){tabUrls.forEach(u=>URL.revokeObjectURL(u));tabUrls=[];
  $$('[data-kf]',app).forEach(c=>c.onclick=()=>{kf=c.dataset.kf;render()});
  const box=$('[data-plist]',app);
  items.forEach(z=>{const d=document.createElement('div');d.className='pitem';
-  d.innerHTML=`<input type="text" value="${esc(z.title)}" aria-label="${tl('k_name')}"><p class="pmeta">${SRC[z.src]||''}, ${KN(z.kind)}${z.dur?', '+fmt(z.dur):''}, ${esc(z.date)}</p><div data-m></div><div class="row-btns" style="margin:8px 0 0"><button class="chip" data-cv aria-pressed="${!!z.cv}">${z.cv?tl('k_cvon'):tl('k_cvoff')}</button><button class="chip" data-del>${tl('k_del')}</button></div>`;
+  d.innerHTML=`<input type="text" maxlength="300" value="${esc(z.title)}" aria-label="${tl('k_name')}"><p class="pmeta">${SRC[z.src]||''}, ${KN(z.kind)}${z.dur?', '+fmt(z.dur):''}, ${esc(z.date)}</p><div data-m></div><div class="row-btns" style="margin:8px 0 0"><button class="chip" data-cv aria-pressed="${!!z.cv}">${z.cv?tl('k_cvon'):tl('k_cvoff')}</button><button class="chip" data-del>${tl('k_del')}</button></div>`;
   $('input',d).onchange=e=>{z.title=e.target.value;save();window.Cloud&&Cloud.update(z,{title:z.title})};
   $('[data-cv]',d).onclick=()=>{z.cv=!z.cv;save();window.Cloud&&Cloud.update(z,{cv:z.cv});render()};
   $('[data-del]',d).onclick=async()=>{if(window.Cloud&&z.cid&&!confirm('Bu kayıt hesabından ve bütün cihazlarından silinsin mi?'))return;if(window.Cloud)await Cloud.remove(z);if(z.key.startsWith('port:'))await blobDel(z.key);S.port=S.port.filter(q=>q!==z);save();render()};

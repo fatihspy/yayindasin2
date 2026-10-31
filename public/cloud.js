@@ -91,7 +91,7 @@
 
   function saveName() {
     if (!user) return;
-    sb.from('profiles').upsert({ id: user.id, display_name: S.name || '', updated_at: new Date().toISOString() }).then(r => { if (r.error) console.warn('[Yayındasın bulut] profil', r.error.message); });
+    sb.from('profiles').upsert({ id: user.id, display_name: String(S.name || '').slice(0, 80), updated_at: new Date().toISOString() }).then(r => { if (r.error) console.warn('[Yayındasın bulut] profil', r.error.message); });
   }
 
   // ---------- eşitleme ----------
@@ -133,10 +133,11 @@
     const blob = await blobGet(z.key);
     if (!blob) { z.cerr = 'missing'; return; }
     if (blob.size > MAX_BYTES) { z.cerr = 'big'; return; }
+    if (!/^(audio|video|image)\//.test(blob.type || '')) { z.cerr = 'type'; return; }
     const path = `${user.id}/${crypto.randomUUID()}.${extOf(blob.type)}`;
     const up = await sb.storage.from(BUCKET).upload(path, blob, { contentType: (blob.type || 'application/octet-stream').split(';')[0], upsert: false });
     if (up.error) throw up.error;
-    const row = { local_id: z.id, title: z.title || '', kind: z.kind, src: z.src || null, dur: z.dur || null, rec_date: z.date || null, cv: !!z.cv, path, mime: blob.type || null, size: blob.size };
+    const row = { local_id: String(z.id).slice(0, 80), title: String(z.title || '').slice(0, 300), kind: z.kind, src: z.src ? String(z.src).slice(0, 20) : null, dur: z.dur || null, rec_date: z.date ? String(z.date).slice(0, 40) : null, cv: !!z.cv, path, mime: blob.type ? String(blob.type).slice(0, 100) : null, size: blob.size };
     let ins = await sb.from('recordings').insert(row).select().single();
     if (ins.error && ins.error.code === '23505') { // aynı kayıt başka sekmeden yüklenmiş
       await sb.storage.from(BUCKET).remove([path]);
@@ -156,7 +157,13 @@
         if (!user) break;
         if (z.cid || z.cerr || (z.owner && z.owner !== user.id)) continue;
         try { await upload(z); changed = true; save(); }
-        catch (e) { console.warn('[Yayındasın bulut] yükleme', e.message || e); offline = true; setTimeout(queue, 30000); break; }
+        catch (e) {
+          const msg = String((e && (e.message || e.error)) || e);
+          console.warn('[Yayındasın bulut] yükleme', msg);
+          if (/row-level security|violates/i.test(msg)) { z.cerr = 'quota'; changed = true; save(); continue; } // kota dolu
+          if (/mime|content type|not supported/i.test(msg)) { z.cerr = 'type'; changed = true; save(); continue; }
+          offline = true; setTimeout(queue, 30000); break;
+        }
       }
     } finally { uploading = false; }
     if (changed) { offline = false; rerender(); }
@@ -201,7 +208,7 @@
     const btns = d.querySelector('.row-btns');
     const box = document.createElement('div');
     if (!z.cid) {
-      const why = z.cerr === 'big' ? 'Dosya 50 MB’tan büyük olduğu için buluta yüklenemedi; sadece bu cihazda.' : z.cerr === 'missing' ? 'Dosya bu cihazda bulunamadığı için buluta yüklenemedi.' : (offline ? 'Bağlantı bekleniyor; yüklenecek.' : 'Buluta yükleniyor…');
+      const why = z.cerr === 'quota' ? 'Hesabındaki kayıt alanı doldu (100 MB). Eski kayıtlardan birkaçını silersen bu kayıt yüklenir.' : z.cerr === 'type' ? 'Bu dosya türü buluta yüklenemiyor; sadece ses, video ve fotoğraf.' : z.cerr === 'big' ? 'Dosya 50 MB’tan büyük olduğu için buluta yüklenemedi; sadece bu cihazda.' : z.cerr === 'missing' ? 'Dosya bu cihazda bulunamadığı için buluta yüklenemedi.' : (offline ? 'Bağlantı bekleniyor; yüklenecek.' : 'Buluta yükleniyor…');
       box.innerHTML = `<p class="clst ${z.cerr ? 'err' : ''}">${why}</p>`;
     } else {
       const sbtn = document.createElement('button');
@@ -346,8 +353,13 @@
     }
   });
 
+  async function token() {
+    if (!user) return null;
+    try { const { data } = await sb.auth.getSession(); return data && data.session ? data.session.access_token : null; } catch (e) { return null; }
+  }
+
   window.Cloud = {
-    enabled: true, get user() { return user; }, get trainer() { return trainer; },
+    enabled: true, token, get user() { return user; }, get trainer() { return trainer; },
     queue, update, remove, url, decorate, kayitStatus, accountCard, saveName
   };
   rerender();

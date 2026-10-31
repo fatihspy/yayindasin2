@@ -37,12 +37,26 @@
   }
   const lastUser = msgs => (msgs.filter(m => m.role !== 'assistant').pop() || {}).content || '';
 
+  // Güvenlik: yapay zekâ metni uygulamada HTML olarak da gösteriliyor. İçine kod sızmasın diye
+  // HTML'de özel anlamı olan < > " karakterlerini zararsız benzerleriyle değiştir.
+  const clean = t => String(t).replace(/</g, '‹').replace(/>/g, '›').replace(/"/g, '”');
+  const deepClean = v => typeof v === 'string' ? clean(v)
+    : Array.isArray(v) ? v.map(deepClean)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, deepClean(x)]))
+    : v;
+
+  let limitShown = 0;
+  async function authHeader() {
+    try { const t = window.Cloud && Cloud.token ? await Cloud.token() : null; return t ? { Authorization: 'Bearer ' + t } : {}; }
+    catch (e) { return {}; }
+  }
+
   async function once(messages, opts, json) {
     let res;
     try {
       res = await fetch(ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
         body: JSON.stringify({ messages, json: !!json, tier: opts.modelTier || 'default' }),
         signal: opts.signal
       });
@@ -57,6 +71,11 @@
       // yapay zekâyı oturum boyunca kapatıyor. Sunucu hataları geçici olduğu için farklı kod kullan.
       const code = res.status === 429 ? 'rate_limited' : 'server_error';
       console.warn('[Yayındasın AI]', res.status, data.error || '', data.detail || '');
+      if (data.code === 'daily_limit') {
+        // Günlük hak doldu: tekrar denemenin anlamı yok, kullanıcıya bir kez söyle
+        if (Date.now() - limitShown > 60000 && typeof window.toast === 'function') { limitShown = Date.now(); window.toast(data.error); }
+        throw { code, message: data.error, retry: false };
+      }
       throw { code, message: data.error || ('HTTP ' + res.status), retry: res.status === 429 || res.status >= 500 };
     }
     const onText = typeof opts.onText === 'function' ? opts.onText : null;
@@ -68,14 +87,14 @@
         if (done) break;
         const delta = dec.decode(value, { stream: true });
         text += delta;
-        if (onText && delta && !json) { try { onText({ text, delta }); } catch (e) {} }
+        if (onText && delta && !json) { try { onText({ text: clean(text), delta: clean(delta) }); } catch (e) {} }
       }
       text += dec.decode();
     } else {
       text = await res.text();
     }
     if (!text.trim()) throw { code: 'server_error', message: 'Yapay zekâ boş yanıt döndürdü', retry: true };
-    return text;
+    return json ? text : clean(text);
   }
 
   function parseJSON(text, prompt) {
@@ -98,7 +117,7 @@
         }
       } catch (e) { if (e && e.code) throw e; }
     }
-    return v;
+    return deepClean(v);
   }
 
   async function run(input, opts, json) {

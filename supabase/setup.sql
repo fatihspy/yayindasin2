@@ -113,7 +113,6 @@ create policy "egitmen gonderileni okur" on storage.objects for select to authen
          and exists (select 1 from public.recordings r where r.path = storage.objects.name and r.shared));
 
 -- ============================================================
--- EĞİTMENİ BELİRLE: aşağıdaki satırdaki e-postayı eğitmenin e-postasıyla değiştir,
--- satırın başındaki "--" işaretini sil ve sadece bu satırı seçip Run'a bas.
--- insert into public.trainers (email) values ('egitmen@ornek.com') on conflict do nothing;
+-- SONRAKİ ADIM: guvenlik-guncelleme.sql dosyasını da çalıştır.
+-- Eğitmen ekleme talimatı o dosyanın sonunda (eğitmen artık hesap kimliğiyle eklenir).
 -- ============================================================
