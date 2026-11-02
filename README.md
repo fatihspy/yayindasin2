@@ -2,12 +2,13 @@
 
 Spikerlik ve sunuculuk eğitim simülasyonu.
 
-- `public/` — site (Netlify bunu yayınlar)
+- `public/` — site
+- `wrangler.jsonc` + `worker/index.js` — Cloudflare Workers yayını (site + /api/ai)
 - `netlify/edge-functions/ai.js` — yapay zekâ (Google Gemini)
 - `public/cloud.js` + `supabase/setup.sql` — hesaplar, bulut kayıtları, eğitmen paneli (Supabase)
 
 ## Yapay zekâ
-Netlify → Environment variables:
+Cloudflare → Worker → Settings → Variables and Secrets (Netlify'da: Environment variables):
 - `GEMINI_API_KEY` — https://aistudio.google.com/apikey
 - `ALLOWED_ORIGIN` — `https://SITEN.netlify.app`
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY` — `public/config.js` ile aynı değerler (günlük kullanım sınırı için)

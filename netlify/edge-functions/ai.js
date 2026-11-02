@@ -20,7 +20,8 @@ const HEADER_TIMEOUT_MS = 8000;   // model bu sürede cevaba başlamazsa sırada
 const COOLDOWN_MS = 60000;        // yoğun/kotası dolmuş modeli bu süre atla
 const API = 'https://generativelanguage.googleapis.com/v1beta/models/';
 
-const env = k => (globalThis.Netlify && Netlify.env.get(k)) || '';
+// Netlify'da Netlify.env, Cloudflare'de worker/index.js'in her istekte koyduğu globalThis.__YENV
+const env = k => (globalThis.Netlify && Netlify.env.get(k)) || (globalThis.__YENV && globalThis.__YENV[k]) || '';
 const json = (status, body) =>
   new Response(JSON.stringify(body, null, 1), { status, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
 const norm = s => String(s || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/+$/, '');

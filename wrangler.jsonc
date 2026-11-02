@@ -1,0 +1,15 @@
+{
+  // Cloudflare Workers ayarları
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yayindasin",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-15",
+  // panelden girilen ortam değişkenleri her yayında korunsun
+  "keep_vars": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true }
+}
