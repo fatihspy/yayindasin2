@@ -138,7 +138,7 @@ export default async (req, context) => {
   if (req.method === 'GET') {
     const t = url.searchParams.get('test');
     if (t) {
-      if (!env('DIAG_KEY')) return json(403, { error: "Teşhis kapalı. Netlify'da DIAG_KEY tanımla ve /api/ai?test=DIAG_KEY adresini aç." });
+      if (!env('DIAG_KEY')) return json(403, { error: 'Teşhis kapalı. Barındırma panelinde (Cloudflare / Netlify) DIAG_KEY ortam değişkenini tanımla ve /api/ai?test=DIAG_KEY adresini aç.' });
       if (t !== env('DIAG_KEY')) return json(403, { error: 'Teşhis şifresi yanlış.' });
       return json(200, await diagnose(key, req, context));
     }
