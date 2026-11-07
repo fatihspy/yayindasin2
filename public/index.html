@@ -801,7 +801,8 @@ const sleep=ms=>new Promise(r=>after(ms,r));
 
 /* ---------- mic / recorder / camera ---------- */
 const Mic={an:null,stream:null,ctx:null,buf:null,sim:0,
-  async start(){if(this.an)return true;try{const o=await openAudio(false);this.raw=o.raw;this.stream=o.stream;this.ctx=o.ctx;this.an=o.an;this.buf=new Float32Array(this.an.fftSize);this.err=null;return true}catch(e){this.err=mediaErr(e,'microphone');return false}},
+  async start(){if(this.an)return true;if(this._p)return this._p;this._p=this._open();try{return await this._p}finally{this._p=null}},
+  async _open(){try{const o=await openAudio(false);this.raw=o.raw;this.stream=o.stream;this.ctx=o.ctx;this.an=o.an;this.buf=new Float32Array(this.an.fftSize);this.err=null;return true}catch(e){this.err=mediaErr(e,'microphone');return false}},
   level(){if(!this.an)return this.sim;this.an.getFloatTimeDomainData(this.buf);let s=0;for(let i=0;i<this.buf.length;i++)s+=this.buf[i]*this.buf[i];return Math.min(1,Math.sqrt(s/this.buf.length)*6)},
   stop(){[this.stream,this.raw].forEach(st=>st&&st.getTracks().forEach(t=>t.stop()));if(this.ctx)try{this.ctx.close()}catch(e){}this.an=this.stream=this.raw=this.ctx=null;this.sim=0}};
 /* ---------- microphone settings (device, processing, input level) ---------- */
@@ -834,9 +835,18 @@ function micPanel(box,{onDone,doneLabel}={}){
  const stopLive=()=>{cancelAnimationFrame(raf);if(live){live.stop();live=null}};
  async function listDevs(){try{const ds=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput'&&d.deviceId&&d.deviceId!=='default'&&d.deviceId!=='communications');const sel=q('[data-dev]');const cur=sel.value||c.dev;
   sel.innerHTML='<option value="">Varsayılan mikrofon</option>'+ds.map((d,i)=>`<option value="${esc(d.deviceId)}">${esc(d.label||('Mikrofon '+(i+1)))}</option>`).join('');if(ds.some(d=>d.deviceId===cur))sel.value=cur}catch(e){}}
- async function restart(){stopLive();if(closed)return;q('[data-merr]').textContent='';
-  try{live=await openAudio(false,read())}catch(e){q('[data-merr]').textContent=MEDIA_MSG[mediaErr(e,'microphone')]||MEDIA_MSG.other;return}
-  if(closed){stopLive();return}await listDevs();const buf=new Float32Array(live.an.fftSize);let sm=0;
+ let gen=0;
+ async function restart(){const my=++gen;stopLive();if(closed)return;q('[data-merr]').textContent='';
+  let o=null;
+  for(let tryNo=0;tryNo<3&&!o;tryNo++){
+   try{o=await openAudio(false,read())}
+   catch(e){if(my!==gen||closed)return;
+    /* cihaz bir an önce kapatılan akış yüzünden meşgul görünebilir: kısa bekleyip tekrar dene */
+    if(e&&e.name==='NotReadableError'&&tryNo<2){await new Promise(r=>setTimeout(r,500*(tryNo+1)));continue}
+    q('[data-lv]').style.width='0%';q('[data-lvt]').textContent='Mikrofon açılamadı.';
+    q('[data-merr]').innerHTML=esc(MEDIA_MSG[mediaErr(e,'microphone')]||MEDIA_MSG.other)+(e&&e.name==='NotReadableError'?'<br>Bu siteyi başka bir sekmede açık bıraktıysan o sekmeyi kapat; mikserin ya da ses kartının kendi programı (ör. Mixcast, OBS, Discord) mikrofonu tutuyorsa onu da kapatıp bu sayfayı yenile.':'');return}}
+  if(my!==gen||closed){o.stop();return} /* bu arada başka bir ayar seçildi: bu akışı hemen kapat */
+  live=o;await listDevs();if(my!==gen||closed)return;const buf=new Float32Array(live.an.fftSize);let sm=0;
   const tick=()=>{if(!live||closed)return;live.an.getFloatTimeDomainData(buf);let x=0,pk=0;for(let i=0;i<buf.length;i++){x+=buf[i]*buf[i];pk=Math.max(pk,Math.abs(buf[i]))}const lv=Math.min(1,Math.sqrt(x/buf.length)*6);sm=sm*.8+lv*.2;peak=Math.max(peak*.97,pk);
    q('[data-lv]').style.width=(sm*100)+'%';q('[data-lvt]').textContent=peak>.98?'Çok yüksek, ses bozuluyor: giriş seviyesini düşür ya da mikrofondan biraz uzaklaş.':sm<.05?'Ses gelmiyor ya da çok kısık. Konuşmayı dene; gerekirse giriş seviyesini artır.':sm>.8?'Biraz yüksek; seviyeyi azıcık düşürebilirsin.':'Seviye iyi.';raf=requestAnimationFrame(tick)};tick()}
  q('[data-dev]').onchange=restart;['[data-ns]','[data-ec]','[data-agc]'].forEach(k=>q(k).onchange=restart);
