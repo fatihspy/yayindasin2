@@ -20,7 +20,7 @@ Teşhis: `https://SITENIN-ADRESI/api/ai?test=DIAG_KEY`
 ## Bulut kayıtları (Supabase)
 1. https://supabase.com → New project (bölge: Frankfurt / eu-central-1).
 2. SQL Editor → New query → `supabase/setup.sql` dosyasının tamamını yapıştır → Run.
-3. `supabase/guvenlik-guncelleme.sql` ve `supabase/ilerleme.sql` dosyalarını da aynı şekilde çalıştır.
+3. `supabase/guvenlik-guncelleme.sql`, `supabase/ilerleme.sql` ve `supabase/kvkk.sql` dosyalarını da bu sırayla aynı şekilde çalıştır.
    Eğitmeni belirle (eğitmen siteye hesap açtıktan SONRA):
    `insert into public.trainer_users (user_id) select id from auth.users where email = 'egitmen@ornek.com' on conflict do nothing;`
 4. Authentication → URL Configuration → Site URL ve Redirect URLs: sitenin adresi
@@ -32,6 +32,13 @@ Teşhis: `https://SITENIN-ADRESI/api/ai?test=DIAG_KEY`
 
 Ücretsiz plan: 1 GB dosya, ayda 5 GB izleme, dosya başına 50 MB. Proje 1 hafta kullanılmazsa uykuya alınır;
 Supabase panelinden "Restore" ile uyandırılır.
+
+## KVKK
+- `public/gizlilik.html` — Aydınlatma Metni ve Açık Rıza Metni. Sarı alanları doldur, bir hukukçuya kontrol ettir, sonra en üstteki "TASLAK" kutusunu sil.
+- Metni değiştirirsen `gizlilik.html` içindeki "Sürüm" ile `public/cloud.js` içindeki `KVKK_V` değerini birlikte artır; herkes bir sonraki girişte yeni metni onaylar.
+- Hesap açarken: aydınlatma metni + 18 yaş/veli onayı zorunlu, ses/görüntü rızası isteğe bağlı.
+- Rıza yoksa kayıtlar buluta yüklenmez (sunucu da engeller). Rıza geri alınınca buluttaki kayıtlar silinir.
+- Profil → Hesap → "Hesabımı ve verilerimi sil" her şeyi kalıcı olarak siler.
 
 ## Yerelde çalıştırma
 ```

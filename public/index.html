@@ -2204,7 +2204,7 @@ function onboard(){const old=$('.ob');if(old)old.remove();const o=document.creat
  <div class="ob-card"><h2>${tl('ob_title')}</h2>
   <label class="fl"><input id="obf" type="text" autocomplete="given-name" autocapitalize="words" maxlength="40" placeholder=" " value="${esc(f0)}"><span>${tl('ob_first')}</span></label>
   <label class="fl"><input id="obl" type="text" autocomplete="family-name" autocapitalize="words" maxlength="40" placeholder=" " value="${esc(l0)}"><span>${tl('ob_last')}</span></label>
-  <button class="btn rec ob-go" data-go disabled>${tl('ob_go')}</button><p class="note" style="margin:12px 0 0">${tl('ob_hint')}</p></div>`;
+  <button class="btn rec ob-go" data-go disabled>${tl('ob_go')}</button><p class="note" style="margin:12px 0 0">${tl('ob_hint')}</p><p class="note" style="margin:6px 0 0;font-size:12.5px">🔒 <a href="/gizlilik.html" target="_blank" rel="noopener" style="color:inherit">Gizlilik ve KVKK</a></p></div>`;
  document.body.appendChild(o);document.body.style.overflow='hidden';
  const F=$('#obf',o),Lf=$('#obl',o),go=$('[data-go]',o),ltn=$('[data-ltn]',o);
  const upd=()=>{const f=F.value.trim(),l=Lf.value.trim();ltn.textContent=(f||l)?`${f} ${l}`.trim():`${tl('ob_first')} ${tl('ob_last')}`;ltn.classList.toggle('ph',!(f||l));go.disabled=!(f&&l)};upd();

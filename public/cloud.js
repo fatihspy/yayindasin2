@@ -23,6 +23,12 @@
   });
 
   let user = null, trainer = false, recovery = false;
+  // KVKK: aydınlatma metni sürümü (gizlilik.html'deki "Sürüm" ile aynı tutulmalı)
+  const KVKK_V = '1';
+  const PRIV = '/gizlilik.html';
+  // cons: null = henüz bilinmiyor; legacy = kvkk.sql çalıştırılmamış (eski kurulum, engelleme yok)
+  let cons = null;
+  const mediaOk = () => !!(cons && (cons.legacy || cons.media));
   let uploading = false, lastPull = 0, offline = false;
   const urlCache = {};
 
@@ -55,7 +61,14 @@
   .clst{font-size:13px;color:var(--muted);margin:8px 0 0}.clst.ok{color:var(--c-grn)}.clst.err{color:var(--tally)}
   .fb{margin-top:10px;background:color-mix(in srgb,var(--c-grn) 12%,var(--surface));border:1px solid color-mix(in srgb,var(--c-grn) 40%,var(--line));border-radius:12px;padding:10px 12px;font-size:14px}
   .fb b{display:block;font-size:13px;margin-bottom:2px}.tp .who{font-weight:800}.tp .pmeta{margin-top:2px}
-  .tpbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px}.tpbar select{font:inherit;font-size:14px;font-weight:600;padding:8px 10px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}`;
+  .tpbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px}.tpbar select{font:inherit;font-size:14px;font-weight:600;padding:8px 10px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+  .ck{display:flex;gap:10px;align-items:flex-start;margin:10px 0 0;font-size:14px;line-height:1.4;cursor:pointer}.ck input{width:20px;height:20px;flex:none;margin:1px 0 0;accent-color:var(--accent,#6A4CF6)}
+  .ck a,.acc a.pl{color:inherit;text-decoration:underline;text-underline-offset:2px}.ck small{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
+  .kv{position:fixed;inset:0;z-index:9999;background:rgba(10,8,25,.55);display:flex;align-items:flex-end;justify-content:center;padding:16px}
+  .kv>div{background:var(--surface,#fff);color:var(--ink,#111);border-radius:20px;max-width:480px;width:100%;max-height:90vh;overflow:auto;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+  .kv h2{margin:0 0 6px;font-size:20px}@media(min-width:600px){.kv{align-items:center}}
+  .dz{margin-top:14px;border:1px solid color-mix(in srgb,var(--tally,#e33) 45%,var(--line));border-radius:12px;padding:12px}.dz input{width:100%;font:inherit;padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);margin:8px 0}
+  .btn.danger{background:var(--tally,#d33);color:#fff;border-color:transparent}`;
   document.head.appendChild(st);
 
   // ---------- oturum ----------
@@ -64,12 +77,70 @@
     const nu = session ? session.user : null;
     const changed = (nu && nu.id) !== (user && user.id);
     user = nu;
+    if (changed) cons = null;
     if (changed) setTimeout(() => (user ? afterLogin() : rerender()), 0);
     else if (event === 'PASSWORD_RECOVERY') setTimeout(rerender, 0);
   });
 
+  async function loadConsent() {
+    cons = null;
+    const r = await sb.from('profiles').select('kvkk_version,kvkk_at,age_ok,media_consent_at').eq('id', user.id).maybeSingle();
+    if (r.error) {
+      // Sütunlar yoksa kvkk.sql henüz çalıştırılmamış: eski davranış sürsün, kimse engellenmesin
+      if (/kvkk_version|column/i.test(r.error.message || '')) cons = { legacy: true };
+      return;
+    }
+    const d = r.data || {};
+    cons = { kvkk: d.kvkk_version || null, kvkk_at: d.kvkk_at, age: d.age_ok, media: !!d.media_consent_at, media_at: d.media_consent_at };
+  }
+
+  async function setConsent(kvkk, age, media) {
+    const r = await sb.rpc('record_consent', { kvkk, age, media });
+    if (r.error) throw r.error;
+    await loadConsent();
+  }
+
+  // Hesap açarken işaretlenen onaylar (e-posta onayından sonra ilk girişte kaydedilir)
+  const PEND = 'yayindasin-pending-consent';
+  const takePending = () => { try { const v = JSON.parse(localStorage.getItem(PEND) || 'null'); localStorage.removeItem(PEND); return v; } catch (e) { return null; } };
+
+  async function ensureConsent() {
+    if (!user) return;
+    if (!cons) await loadConsent();
+    if (!cons || cons.legacy || cons.kvkk === KVKK_V) return;
+    const p = takePending();
+    if (p && p.email === user.email && p.kvkk === KVKK_V) {
+      try { await setConsent(KVKK_V, true, !!p.media); return; } catch (e) { console.warn('[Yayındasın KVKK]', e.message); }
+    }
+    consentDialog();
+  }
+
+  // Aydınlatma metni onaylanmamış (ya da metin değişmiş) hesaplar için tek seferlik pencere
+  function consentDialog() {
+    if (document.querySelector('.kv')) return;
+    const again = !!(cons && cons.kvkk);
+    const o = document.createElement('div'); o.className = 'kv'; o.setAttribute('role', 'dialog'); o.setAttribute('aria-modal', 'true'); o.setAttribute('aria-label', 'Gizlilik');
+    o.innerHTML = `<div><h2>${again ? 'Gizlilik metni güncellendi' : 'Kişisel verilerin'}</h2>
+      <p class="note" style="margin:0">Hesabını kullanmaya devam etmek için aydınlatma metnini onayla. Ses/görüntü rızası isteğe bağlıdır.</p>
+      <label class="ck"><input type="checkbox" data-k1><span><a href="${PRIV}#aydinlatma" target="_blank" rel="noopener">Aydınlatma Metni</a>’ni okudum.</span></label>
+      <label class="ck"><input type="checkbox" data-k2><span>18 yaşından büyüğüm ya da velimin onayı var.</span></label>
+      <label class="ck"><input type="checkbox" data-k3 ${cons && cons.media ? 'checked' : ''}><span>Ses ve görüntü kayıtlarımın hesabımda saklanmasına ve seçtiklerimi eğitmene gönderebilmeye <a href="${PRIV}#riza" target="_blank" rel="noopener">açık rıza</a> veriyorum.<small>İsteğe bağlı. Vermezsen kayıtların sadece bu cihazda kalır.</small></span></label>
+      <div class="row-btns" style="margin-top:14px"><button class="btn" data-ok disabled>Devam</button><button class="btn ghost sm" data-out>Çıkış yap</button></div>
+      <p class="clst err" data-m></p></div>`;
+    document.body.appendChild(o);
+    const k1 = o.querySelector('[data-k1]'), k2 = o.querySelector('[data-k2]'), k3 = o.querySelector('[data-k3]'), ok = o.querySelector('[data-ok]'), m = o.querySelector('[data-m]');
+    const upd = () => { ok.disabled = !(k1.checked && k2.checked); }; k1.onchange = upd; k2.onchange = upd;
+    ok.onclick = async () => {
+      ok.disabled = true; m.textContent = '';
+      try { await setConsent(KVKK_V, true, k3.checked); o.remove(); toast('Tercihlerin kaydedildi'); queue(); rerender(); }
+      catch (e) { m.textContent = 'Kaydedilemedi: ' + (e.message || e); upd(); }
+    };
+    o.querySelector('[data-out]').onclick = () => { o.remove(); signOut(); };
+  }
+
   async function afterLogin() {
     try { const r = await sb.rpc('is_trainer'); trainer = r.data === true; } catch (e) { trainer = false; }
+    await ensureConsent();
     await syncProgress(); // önce ilerleme (ad dahil) gelsin
     saveName();
     await pull(true);
@@ -87,7 +158,8 @@
     S.port = keep;
     clearTimeout(pTimer); await syncProgress(); // son değişiklikleri gönder
     clearProgressLocal(); // ortak cihazda bir sonraki kişi görmesin
-    trainer = false;
+    trainer = false; cons = null;
+    const d = document.querySelector('.kv'); if (d) d.remove();
     await sb.auth.signOut();
     rerender();
   }
@@ -152,7 +224,7 @@
   }
 
   async function queue() {
-    if (!user || uploading) return;
+    if (!user || uploading || !mediaOk()) return;
     uploading = true;
     let changed = false;
     try {
@@ -163,7 +235,11 @@
         catch (e) {
           const msg = String((e && (e.message || e.error)) || e);
           console.warn('[Yayındasın bulut] yükleme', msg);
-          if (/row-level security|violates/i.test(msg)) { z.cerr = 'quota'; changed = true; save(); continue; } // kota dolu
+          if (/row-level security|violates/i.test(msg)) {
+            await loadConsent();
+            if (!mediaOk()) { changed = true; break; } // rıza başka cihazda geri alınmış
+            z.cerr = 'quota'; changed = true; save(); continue; // kota dolu
+          }
           if (/mime|content type|not supported/i.test(msg)) { z.cerr = 'type'; changed = true; save(); continue; }
           offline = true; setTimeout(queue, 30000); break;
         }
@@ -210,7 +286,13 @@
     if (!user) return;
     const btns = d.querySelector('.row-btns');
     const box = document.createElement('div');
-    if (!z.cid) {
+    if (!z.cid && !mediaOk()) {
+      if (!cons) return;
+      box.innerHTML = `<p class="clst">Bu kayıt sadece bu cihazda. Buluta yedeklemek ve eğitmene göndermek için ses/görüntü rızası gerekiyor.</p>`;
+      const b = document.createElement('button'); b.className = 'btn ghost sm'; b.textContent = 'Rıza ver'; b.style.marginTop = '6px';
+      b.onclick = () => mediaConsentAsk();
+      box.appendChild(b);
+    } else if (!z.cid) {
       const why = z.cerr === 'quota' ? 'Hesabındaki kayıt alanı doldu (100 MB). Eski kayıtlardan birkaçını silersen bu kayıt yüklenir.' : z.cerr === 'type' ? 'Bu dosya türü buluta yüklenemiyor; sadece ses, video ve fotoğraf.' : z.cerr === 'big' ? 'Dosya 50 MB’tan büyük olduğu için buluta yüklenemedi; sadece bu cihazda.' : z.cerr === 'missing' ? 'Dosya bu cihazda bulunamadığı için buluta yüklenemedi.' : (offline ? 'Bağlantı bekleniyor; yüklenecek.' : 'Buluta yükleniyor…');
       box.innerHTML = `<p class="clst ${z.cerr ? 'err' : ''}">${why}</p>`;
     } else {
@@ -232,10 +314,77 @@
       el.querySelector('[data-gologin]').onclick = () => { tab = 'profil'; window.scrollTo(0, 0); rerender(); setTimeout(() => { const a = document.querySelector('[data-account]'); a && a.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 50); };
       return;
     }
+    if (cons && !mediaOk()) {
+      el.innerHTML = `<p class="clst" style="margin-top:10px">☁ <span data-notr>${esc(user.email)}</span> · Ses/görüntü rızası verilmediği için kayıtların sadece bu cihazda. <button class="btn ghost sm" data-mc>Rıza ver</button></p>`;
+      el.querySelector('[data-mc]').onclick = () => mediaConsentAsk();
+      return;
+    }
     const n = (S.port || []).filter(z => z.cid).length, wait = (S.port || []).filter(z => !z.cid && !z.cerr).length;
     el.innerHTML = `<p class="clst ${offline ? 'err' : 'ok'}" style="margin-top:10px">☁ <span data-notr>${esc(user.email)}</span> · ${n} kayıt bulutta${wait ? ` · ${wait} yükleniyor` : ''}${offline ? ' · bağlantı sorunu, tekrar denenecek' : ''}</p>`;
     queue();
     pull(false).then(ch => { if (ch && sheetEl().hidden) rerender(); });
+  }
+
+  // ---------- KVKK: ses/görüntü rızası, geri alma, hesap silme ----------
+  function mediaConsentAsk() {
+    const ok = confirm('Ses ve görüntü kayıtlarının hesabında (yurt dışındaki sunucularda) saklanmasına ve seçtiklerini eğitmene gönderebilmeye açık rıza veriyor musun?\n\nAyrıntılar: Gizlilik ve KVKK sayfası. Rızanı Profil → Hesap bölümünden istediğin zaman geri alabilirsin.');
+    if (!ok) return;
+    setConsent(null, null, true).then(() => {
+      (S.port || []).forEach(z => { if (z.cerr === 'consent') delete z.cerr; });
+      save(); toast('Rızan kaydedildi; kayıtların yükleniyor'); queue(); rerender();
+    }).catch(e => toast('Kaydedilemedi: ' + (e.message || e)));
+  }
+
+  // Tüm dosyaları depodan siler (klasör = kullanıcı kimliği)
+  async function removeAllFiles() {
+    for (let i = 0; i < 50; i++) {
+      const l = await sb.storage.from(BUCKET).list(user.id, { limit: 100 });
+      if (l.error) throw l.error;
+      const names = (l.data || []).filter(f => f && f.name && f.id !== null).map(f => user.id + '/' + f.name);
+      if (!names.length) return;
+      const r = await sb.storage.from(BUCKET).remove(names);
+      if (r.error) throw r.error;
+    }
+  }
+
+  async function withdrawMedia() {
+    if (!confirm('Ses/görüntü rızanı geri alırsan buluttaki bütün kayıtların ve eğitmene gönderdiklerin silinir. Bu cihazda bulunan kayıtlar cihazda kalır. Devam edilsin mi?')) return;
+    try {
+      await pull(true);
+      // Önce yeni yüklemeyi durdur, sonra buluttakileri sil
+      await setConsent(null, null, false);
+      const d = await sb.from('recordings').delete().eq('user_id', user.id);
+      if (d.error) throw d.error;
+      await removeAllFiles();
+      const keep = [];
+      for (const z of S.port || []) {
+        if (!z.cid || !mine(z)) { keep.push(z); continue; }
+        const local = z.key && z.key.startsWith('port:') && await blobGet(z.key);
+        if (local) { ['cid', 'owner', 'path', 'shared', 'feedback', 'feedback_at'].forEach(k => delete z[k]); keep.push(z); }
+        else if (z.key && z.key.startsWith('cloud:')) await blobDel(z.key);
+      }
+      S.port = keep; save();
+      toast('Rızan geri alındı, buluttaki kayıtların silindi');
+    } catch (e) { toast('Tamamlanamadı: ' + (e.message || e)); }
+    rerender();
+  }
+
+  async function deleteAccount(msg) {
+    msg.textContent = 'Siliniyor…'; msg.className = 'clst';
+    try {
+      await removeAllFiles();
+      const r = await sb.rpc('delete_my_account');
+      if (r.error) throw r.error;
+    } catch (e) { msg.textContent = 'Silinemedi: ' + (e.message || e); msg.className = 'clst err'; return; }
+    // Bu cihazdaki hesap verilerini de temizle
+    for (const z of S.port || []) if (z.key && /^(port|cloud):/.test(z.key)) await blobDel(z.key);
+    S.port = []; clearTimeout(pTimer);
+    clearProgressLocal();
+    trainer = false; cons = null;
+    try { await sb.auth.signOut({ scope: 'local' }); } catch (e) {}
+    user = null;
+    toast('Hesabın ve bütün verilerin silindi');
+    rerender();
   }
 
   // ---------- Profil: hesap kartı ----------
@@ -257,8 +406,13 @@
         <p class="note" style="margin:0 0 4px">Giriş yaparsan kayıtların her cihazda görünür ve istediğini eğitmenine gönderebilirsin.</p>
         <label class="f" for="acm">E-posta</label><input type="email" id="acm" autocomplete="email" inputmode="email">
         <label class="f" for="acp">Şifre</label><input type="password" id="acp" autocomplete="current-password">
+        <p class="note" style="margin:12px 0 0">Hesap oluşturuyorsan:</p>
+        <label class="ck"><input type="checkbox" id="ack1"><span><a href="${PRIV}#aydinlatma" target="_blank" rel="noopener">Aydınlatma Metni</a>’ni okudum.</span></label>
+        <label class="ck"><input type="checkbox" id="ack2"><span>18 yaşından büyüğüm ya da velimin onayı var.</span></label>
+        <label class="ck"><input type="checkbox" id="ack3"><span>Ses ve görüntü kayıtlarımın hesabımda saklanmasına ve seçtiklerimi eğitmene gönderebilmeye <a href="${PRIV}#riza" target="_blank" rel="noopener">açık rıza</a> veriyorum.<small>İsteğe bağlı.</small></span></label>
         <div class="row-btns"><button class="btn" data-in>Giriş yap</button><button class="btn ghost" data-up>Hesap oluştur</button></div>
-        <button class="btn ghost sm" data-forgot>Şifremi unuttum</button><p class="note" data-acmsg style="margin:10px 0 0"></p></div>`;
+        <button class="btn ghost sm" data-forgot>Şifremi unuttum</button><p class="note" data-acmsg style="margin:10px 0 0"></p>
+        <p class="note" style="margin:10px 0 0">🔒 <a class="pl" href="${PRIV}" target="_blank" rel="noopener">Gizlilik ve KVKK</a></p></div>`;
       const em = el.querySelector('#acm'), pw = el.querySelector('#acp'), msg = el.querySelector('[data-acmsg]');
       const busy = on => el.querySelectorAll('button').forEach(b => b.disabled = on);
       el.querySelector('[data-in]').onclick = async () => {
@@ -268,6 +422,8 @@
       };
       el.querySelector('[data-up]').onclick = async () => {
         if (pw.value.length < 6) { msg.textContent = 'Şifre en az 6 karakter olmalı.'; return; }
+        if (!el.querySelector('#ack1').checked || !el.querySelector('#ack2').checked) { msg.textContent = 'Hesap oluşturmak için Aydınlatma Metni’ni okuduğunu ve yaş/veli onayını işaretle.'; return; }
+        try { localStorage.setItem(PEND, JSON.stringify({ email: em.value.trim().toLowerCase(), kvkk: KVKK_V, media: el.querySelector('#ack3').checked })); } catch (e) {}
         busy(true); msg.textContent = '';
         const r = await sb.auth.signUp({ email: em.value.trim(), password: pw.value, options: { emailRedirectTo: location.origin } });
         busy(false);
@@ -287,8 +443,23 @@
     el.innerHTML = `<div class="sec"><h2>Hesap</h2><span>☁</span></div><div class="card">
       <p style="margin:0"><b data-notr>${esc(user.email)}</b></p>
       <p class="note" style="margin:4px 0 0">${trainer ? 'Eğitmen hesabı. Öğrencilerin gönderdiği kayıtları panelden izleyip not yazabilirsin.' : 'Kayıtların hesabına yedekleniyor ve her cihazda görünüyor.'}</p>
-      <div class="row-btns">${trainer ? '<button class="btn" data-panel>Eğitmen paneli</button>' : ''}<button class="btn ghost sm" data-out>Çıkış yap</button></div></div>`;
+      <div class="row-btns">${trainer ? '<button class="btn" data-panel>Eğitmen paneli</button>' : ''}<button class="btn ghost sm" data-out>Çıkış yap</button></div>
+      ${cons && !cons.legacy ? `<p class="note" style="margin:12px 0 0">🔒 <a class="pl" href="${PRIV}" target="_blank" rel="noopener">Gizlilik ve KVKK</a> · Ses/görüntü rızası: <b>${cons.media ? 'verildi' : 'verilmedi'}</b></p>
+      <div class="row-btns" style="margin-top:6px">${cons.media ? '<button class="btn ghost sm" data-mw>Rızamı geri al</button>' : '<button class="btn ghost sm" data-mg>Rıza ver</button>'}<button class="btn ghost sm" data-del>Hesabımı ve verilerimi sil</button></div>
+      <div class="dz" data-dz hidden><b>Hesabın kalıcı olarak silinecek</b><p class="note" style="margin:4px 0 0">Buluttaki kayıtların, eğitmen notları, ilerlemen (XP, görevler, CV) ve rıza geçmişin silinir; geri alınamaz. Onaylamak için aşağıya <b>SİL</b> yaz.</p>
+        <input type="text" data-dzi autocomplete="off" aria-label="Onay"><div class="row-btns" style="margin:0"><button class="btn danger sm" data-dzok disabled>Kalıcı olarak sil</button><button class="btn ghost sm" data-dzno>Vazgeç</button></div><p class="clst" data-dzm></p></div>` : `<p class="note" style="margin:12px 0 0">🔒 <a class="pl" href="${PRIV}" target="_blank" rel="noopener">Gizlilik ve KVKK</a></p>`}</div>`;
     const p = el.querySelector('[data-panel]'); if (p) p.onclick = () => openSheet('egitmen');
+    const mw = el.querySelector('[data-mw]'); if (mw) mw.onclick = withdrawMedia;
+    const mg = el.querySelector('[data-mg]'); if (mg) mg.onclick = mediaConsentAsk;
+    const del = el.querySelector('[data-del]');
+    if (del) {
+      const dz = el.querySelector('[data-dz]'), inp = el.querySelector('[data-dzi]'), okb = el.querySelector('[data-dzok]');
+      del.onclick = () => { dz.hidden = false; inp.focus(); };
+      el.querySelector('[data-dzno]').onclick = () => { dz.hidden = true; inp.value = ''; okb.disabled = true; };
+      inp.oninput = () => { okb.disabled = inp.value.trim().toLocaleUpperCase('tr') !== 'SİL'; };
+      okb.onclick = () => { okb.disabled = true; deleteAccount(el.querySelector('[data-dzm]')); };
+    }
+    if (!cons) loadConsent().then(() => { if (cons && el.isConnected) accountCard(el); });
     el.querySelector('[data-out]').onclick = () => {
       if (confirm('Çıkış yapınca hesabına yedeklenmiş kayıtlar bu cihazdan kaldırılır; hesabında durmaya devam eder. Çıkış yapılsın mı?')) signOut();
     };
@@ -432,12 +603,13 @@
   // Uygulama her kaydettiğinde (XP, görev, CV…) birkaç saniye sonra buluta da gönder
   const rawSave = window.save;
   window.save = function () { rawSave(); syncSoon(); };
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && user) syncProgress(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && user) { syncProgress(); loadConsent().then(() => { if (cons && !cons.legacy && cons.kvkk !== KVKK_V) consentDialog(); }); } });
   window.addEventListener('pagehide', () => { if (pTimer && user) { clearTimeout(pTimer); syncProgress(); } });
 
   window.Cloud = {
     enabled: true, token, get user() { return user; }, get trainer() { return trainer; },
-    queue, update, remove, url, decorate, kayitStatus, accountCard, saveName, syncProgress, _merge: mergeProgress
+    queue, update, remove, url, decorate, kayitStatus, accountCard, saveName, syncProgress, _merge: mergeProgress,
+    get consent() { return cons; }, KVKK_V
   };
   rerender();
 })();
