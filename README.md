@@ -10,20 +10,20 @@ Spikerlik ve sunuculuk eğitim simülasyonu.
 ## Yapay zekâ
 Cloudflare → Worker → Settings → Variables and Secrets (Netlify'da: Environment variables):
 - `GEMINI_API_KEY` — https://aistudio.google.com/apikey
-- `ALLOWED_ORIGIN` — `https://SITEN.netlify.app`
+- `ALLOWED_ORIGIN` — sitenin adresi, ör. `https://yayindasin.fatihspyy.workers.dev`
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY` — `public/config.js` ile aynı değerler (günlük kullanım sınırı için)
 - `DIAG_KEY` — teşhis sayfasının şifresi (rastgele uzun bir kelime)
 - İsteğe bağlı: `AI_USER_DAILY` (varsayılan 300), `AI_GUEST_DAILY` (varsayılan 150)
 
-Teşhis: `https://SITEN.netlify.app/api/ai?test=DIAG_KEY`
+Teşhis: `https://SITENIN-ADRESI/api/ai?test=DIAG_KEY`
 
 ## Bulut kayıtları (Supabase)
 1. https://supabase.com → New project (bölge: Frankfurt / eu-central-1).
 2. SQL Editor → New query → `supabase/setup.sql` dosyasının tamamını yapıştır → Run.
-3. `supabase/guvenlik-guncelleme.sql` dosyasını da aynı şekilde çalıştır.
+3. `supabase/guvenlik-guncelleme.sql` ve `supabase/ilerleme.sql` dosyalarını da aynı şekilde çalıştır.
    Eğitmeni belirle (eğitmen siteye hesap açtıktan SONRA):
    `insert into public.trainer_users (user_id) select id from auth.users where email = 'egitmen@ornek.com' on conflict do nothing;`
-4. Authentication → URL Configuration → Site URL: `https://SITEN.netlify.app`
+4. Authentication → URL Configuration → Site URL ve Redirect URLs: sitenin adresi
 5. E-posta onayı: Authentication → Sign In / Providers → Email → "Confirm email".
    Kapalıysa herkes istediği e-postayla hesap açabilir (eğitmen artık hesap kimliğiyle eklendiği için yetki riski yok,
    ama sahte hesap açılabilir). En güvenlisi: özel SMTP (ör. Resend, ücretsiz katmanı var) bağlayıp onayı açmak.

@@ -70,6 +70,7 @@
 
   async function afterLogin() {
     try { const r = await sb.rpc('is_trainer'); trainer = r.data === true; } catch (e) { trainer = false; }
+    await syncProgress(); // önce ilerleme (ad dahil) gelsin
     saveName();
     await pull(true);
     queue();
@@ -83,14 +84,16 @@
       if (mine(z) && z.cid) { if (/^(port|cloud):/.test(z.key)) await blobDel(z.key); }
       else keep.push(z);
     }
-    S.port = keep; save();
+    S.port = keep;
+    clearTimeout(pTimer); await syncProgress(); // son değişiklikleri gönder
+    clearProgressLocal(); // ortak cihazda bir sonraki kişi görmesin
     trainer = false;
     await sb.auth.signOut();
     rerender();
   }
 
   function saveName() {
-    if (!user) return;
+    if (!user || !S.name || S.name === 'Adınız Soyadınız') return;
     sb.from('profiles').upsert({ id: user.id, display_name: String(S.name || '').slice(0, 80), updated_at: new Date().toISOString() }).then(r => { if (r.error) console.warn('[Yayındasın bulut] profil', r.error.message); });
   }
 
@@ -358,9 +361,83 @@
     try { const { data } = await sb.auth.getSession(); return data && data.session ? data.session.access_token : null; } catch (e) { return null; }
   }
 
+  // ---------- ilerlemenin cihazlar arası eşitlenmesi ----------
+  // Eşitlenenler. Mikrofon ayarı, izinler, önbellekler, ses/video (Kayıtlarım'da ayrıca eşitlenir) cihazda kalır.
+  const P_DEF = { xp: 0, done: {}, best: {}, days: {}, street: {}, streetLog: [], ai_tasks: [], genTexts: [], myPoems: [], aiPoems: [], gen: {},
+    name: 'Adınız Soyadınız', first: '', last: '', cv: {}, script: '', theme: undefined, lang: undefined, subs: undefined, marks: undefined, musicVol: undefined, onboarded: undefined };
+  const P_KEYS = Object.keys(P_DEF);
+  const SCALAR = new Set(['name', 'first', 'last', 'cv', 'script', 'theme', 'lang', 'subs', 'marks', 'musicVol', 'onboarded']);
+  const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const baseKey = () => 'yayindasin-sync-base:' + (user ? user.id : '');
+  const loadBase = () => { try { return JSON.parse(localStorage.getItem(baseKey()) || 'null'); } catch (e) { return null; } };
+  const storeBase = b => { try { localStorage.setItem(baseKey(), JSON.stringify(b)); } catch (e) {} };
+  const snapshot = () => { const o = {}; P_KEYS.forEach(k => { if (S[k] !== undefined) o[k] = clone(S[k]); }); return o; };
+  const itemKey = x => (x && typeof x === 'object' && x.id != null) ? 'id:' + x.id : 'j:' + JSON.stringify(x);
+  const unionArr = (a, b) => { const seen = new Set(), out = []; [...(a || []), ...(b || [])].forEach(x => { const k = itemKey(x); if (!seen.has(k)) { seen.add(k); out.push(x); } }); return out; };
+
+  // 3 yönlü birleştirme: L = bu cihaz, R = bulut, B = son eşitlemedeki hal (yoksa ilk eşitleme)
+  function mergeProgress(L, R, B) {
+    const first = !B; B = B || {}; R = R || {};
+    const out = {};
+    for (const k of P_KEYS) {
+      const l = L[k], r = R[k], b = B[k];
+      if (k === 'xp') { out.xp = Math.max(0, (+r || 0) + ((+l || 0) - (+b || 0))); continue; } // bu cihazda kazanılan farkı buluta ekle
+      if (SCALAR.has(k)) {
+        if (first) { out[k] = (r !== undefined && !(k === 'name' && r === P_DEF.name)) ? r : l; } // ilk girişte hesaptaki bilgi geçerli
+        else out[k] = same(l, b) ? (r !== undefined ? r : l) : l; // bu cihazda değiştiyse cihazdaki, değişmediyse buluttaki
+        continue;
+      }
+      if (k === 'done' || k === 'best') { const o = { ...(r || {}) }; Object.entries(l || {}).forEach(([i, v]) => { o[i] = Math.max(+o[i] || 0, +v || 0); }); out[k] = o; continue; }
+      if (k === 'days') { const o = {}; [r || {}, l || {}].forEach(src => Object.entries(src).forEach(([d, ids]) => { o[d] = unionArr(o[d], ids); })); out[k] = o; continue; }
+      if (k === 'street') { out[k] = { ...(r || {}), ...(l || {}) }; continue; }
+      if (k === 'gen') { const o = {}; [r || {}, l || {}].forEach(src => Object.entries(src).forEach(([kind, arr]) => { o[kind] = unionArr(o[kind], arr); })); out[k] = o; continue; }
+      out[k] = unionArr(r, l); // streetLog, ai_tasks, genTexts, myPoems, aiPoems
+    }
+    return out;
+  }
+
+  let pTimer = null, pChain = Promise.resolve(), pErr = false;
+  function syncSoon() { if (!user) return; clearTimeout(pTimer); pTimer = setTimeout(() => syncProgress(), 2500); }
+  function syncProgress() { pChain = pChain.then(doSync).catch(e => console.warn('[Yayındasın ilerleme]', e)); return pChain; }
+  async function doSync() {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (!user) return;
+      const uid = user.id;
+      const got = await sb.from('progress').select('data,rev').eq('user_id', uid).maybeSingle();
+      if (got.error) { pErr = true; return; }
+      if (!user || user.id !== uid) return;
+      const remote = got.data ? got.data.data : null, rev = got.data ? (+got.data.rev || 0) : null;
+      const local = snapshot();
+      const merged = mergeProgress(local, remote || {}, remote ? loadBase() : (loadBase() || {}));
+      const changedHere = !same(merged, local);
+      if (changedHere) { P_KEYS.forEach(k => { if (merged[k] !== undefined) S[k] = clone(merged[k]); }); rawSave(); }
+      if (!same(merged, remote)) {
+        const now = new Date().toISOString();
+        let res;
+        if (rev === null) res = await sb.from('progress').insert({ user_id: uid, data: merged, rev: 1, updated_at: now }).select('rev');
+        else res = await sb.from('progress').update({ data: merged, rev: rev + 1, updated_at: now }).eq('user_id', uid).eq('rev', rev).select('rev');
+        const conflict = (res.error && res.error.code === '23505') || (!res.error && (!res.data || !res.data.length));
+        if (conflict) { await new Promise(r => setTimeout(r, 150 + Math.random() * 350)); continue; } // başka cihaz arada yazdı: yeniden oku, birleştir
+        if (res.error) { pErr = true; console.warn('[Yayındasın ilerleme]', res.error.message); return; }
+      }
+      pErr = false; storeBase(merged);
+      if (changedHere && sheetEl().hidden) rerender(); // açık bir alıştırmayı bölme
+      return;
+    }
+    pErr = true;
+  }
+  function clearProgressLocal() { try { localStorage.removeItem(baseKey()); } catch (e) {} P_KEYS.forEach(k => { if (k === 'theme' || k === 'lang' || k === 'onboarded') return; S[k] = clone(P_DEF[k]); }); rawSave(); }
+
+  // Uygulama her kaydettiğinde (XP, görev, CV…) birkaç saniye sonra buluta da gönder
+  const rawSave = window.save;
+  window.save = function () { rawSave(); syncSoon(); };
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && user) syncProgress(); });
+  window.addEventListener('pagehide', () => { if (pTimer && user) { clearTimeout(pTimer); syncProgress(); } });
+
   window.Cloud = {
     enabled: true, token, get user() { return user; }, get trainer() { return trainer; },
-    queue, update, remove, url, decorate, kayitStatus, accountCard, saveName
+    queue, update, remove, url, decorate, kayitStatus, accountCard, saveName, syncProgress, _merge: mergeProgress
   };
   rerender();
 })();
